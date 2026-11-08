@@ -1,83 +1,152 @@
 # game-forge
 
-Turn one sentence of a game idea into something shippable — as a WeChat mini-game or a
-standalone web page — with automated play-testing that actually asserts the game runs.
+**一句话的游戏想法 → 能交付的成品。** 不是"生成游戏"的包装，而是一条带断言的交付流水线：
+需求梳理 → 生成 → 按渠道转换 → 自动试玩验证 → 预览/发布。
 
-## What it does
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Targets](https://img.shields.io/badge/targets-wechat%20%7C%20web-green)]()
+[![Runtime](https://img.shields.io/badge/runtime-Node%2020%2B-yellow)]()
 
 ```
-需求梳理 → brief.json → 生成游戏 → 按渠道转换 → 自动试玩断言 → 截图 → 预览
+                    ┌──────────────────────────────┐
+   一句话需求  ───▶  │  ① 需求梳理（对话）            │
+                    │     渠道 / 玩法 / 交付 三层问题  │
+                    └──────────────┬───────────────┘
+                                   ▼
+                          brief.json   ← 验收标准落盘
+                                   │
+                    ┌──────────────┴───────────────┐
+                    ▼                              ▼
+          ┌──────────────────┐          ┌──────────────────┐
+          │ ② target=wechat  │          │ ② target=web     │
+          │ 小游戏工程        │          │ 单文件 HTML       │
+          │ g2wx + wx-shim   │          │ 复制 + 自包含体检  │
+          └────────┬─────────┘          └────────┬─────────┘
+                   ▼                             ▼
+          ┌──────────────────┐          ┌──────────────────┐
+          │ 模拟器 + 状态日志  │          │ 无头浏览器         │
+          │ automation 驱动   │          │ page.evaluate     │
+          └────────┬─────────┘          └────────┬─────────┘
+                   └──────────────┬───────────────┘
+                                  ▼
+                     同一套断言（读 brief.acceptance）
+                                  ▼
+                       截图 · report.json · 预览二维码
 ```
 
-Two parts:
+## 为什么是"流水线"而不是"技能"
 
-- **需求梳理**（对话）：先问清楚做什么类型、发到哪个渠道、怎么算做成了，落成 `brief.json`
-- **交付流水线**（脚本）：`publish.mjs` 一条命令跑完转换、试玩、断言、预览
+| | 普通 skill | game-forge |
+|---|---|---|
+| 交互 | 对话里读指令 | 对话决定方向，脚本执行交付 |
+| 产物 | 文档、配置 | 可运行的工程 / 可玩的包 |
+| 验证 | 靠人看 | **机器断言**：阶段迁移、帧率、分数 |
+| 可重复 | 每次重来 | 一条命令，退出码说话 |
 
-The same `brief.acceptance` drives both channels — only the executor differs.
+`SKILL.md` 只负责路由；真正的系统在 `scripts/` 里，能脱离 agent 独立运行，
+也能进 CI。
 
-## Requirements
+## 两个渠道
+
+| target | 打包 | 验证 | 部署 |
+|--------|------|------|------|
+| `wechat` | 小游戏工程（约 170 KB） | 开发者工具模拟器 + console 状态日志 | 预览二维码 ✅；上传体验版 ⏳ 待正式 AppID |
+| `web` | 单文件 HTML（约 120 KB，零外链） | 无头 Chrome + `page.evaluate` | ⏸ 待定，见 [references/web.md](references/web.md) |
+
+**同一份 `brief.acceptance`，两个执行器。** 这是两个渠道能共存的根本原因。
+
+## 快速开始
+
+```bash
+git clone https://github.com/guihai24/game-forge.git
+cd game-forge
+
+node scripts/doctor.mjs                 # 环境自检
+
+# 需求落盘
+node scripts/brief.mjs init --out <游戏目录>/game.brief.json \
+  --title 月夜狐灯 --genre collect-and-dodge --target wechat --appid wx...
+node scripts/brief.mjs check --file <游戏目录>/game.brief.json
+
+# 一条命令跑完
+node scripts/publish.mjs --target wechat --game <游戏目录> --preview
+node scripts/publish.mjs --target web    --game <游戏目录>
+```
+
+退出码：`0` 通过 · `1` 参数/环境 · `2` 构建失败 · `3` 工具失败 · `4` **断言失败** · `5` 目标未实现。
+
+实测（月夜狐灯）：微信 150 秒、网页 15 秒，双双退出码 0。
+
+## 三条设计原则
+
+**① 零改写。** 转换器不改游戏代码——`game.js` 原样搬运，浏览器差异全部吸收进
+`scripts/targets/wechat/wx-shim.js`。上游重建后重跑转换即可，不需要合并。
+一旦转换器开始改写游戏代码，每次重建都会变成手工冲突。
+
+**② 断言分软硬。** `fps ≥ N` 是软指标（窗口不在前台会被 Chromium 节流到 ~20），
+只保留 `fps 未塌方 ≥ 10` 当硬门槛。要严格判定加 `--require-fps`。
+产出「跑了但没人知道对不对」的结果，比不跑更糟。
+
+**③ 兼容性默认拒绝。** 扫描到小游戏不支持的 API 就停止转换并给出行号：
+
+```
+✗ 检测到小游戏不支持的 API，已停止转换：
+  · localStorage —— 请改用 wx.setStorageSync
+    命中 1 次，行号 965
+```
+
+确认风险后 `--force` 放行。产出「能编译但黑屏」的包，比直接报错糟糕得多。
+
+## 作为技能安装
+
+```bash
+# 软链（推荐：单一事实源）
+ln -s "$PWD" ~/.agents/skills/game-forge
+
+# 或直接拷贝
+cp -r . ~/.agents/skills/game-forge
+```
+
+配合 `SKILL.md` 使用，agent 会按需求梳理 → 分支 → 交付的流程走。
+
+## 依赖
 
 | 能力 | 需要 |
 |------|------|
-| 生成游戏 | **DeepSeek Harness** + Game Studio plugin（`game_studio_create` 等工具） |
-| `wechat` 渠道 | 微信开发者工具 + [wechatide-skill](../wechatide-skill/) |
+| 生成游戏 | DeepSeek Harness + Game Studio 插件 |
+| `wechat` 渠道 | 微信开发者工具（自带 `wechatide` CLI），踩坑记录见 `references/wechat-gotchas.md` |
 | `web` 渠道 | Chrome + `playwright-core` |
-| SVG 栅格化 | 无头 Chrome（或用 `CHROME_PATH` 指定） |
+| SVG 栅格化 | 无头 Chrome（`CHROME_PATH` 可覆盖） |
 
-> ⚠️ 生成这一步依赖 DSH 的 Game Studio 插件。没有 DSH 时，`g2wx`/`build`/`verify`
-> 仍可对**任何符合产物契约**的游戏目录工作：`dist/index.html` 内含
-> `window.GAME = {title, rules, slots, assets}`，以及同目录的 `game.js`。
+> 没有 DSH 时，`g2wx` / `build` / `verify` 仍可对**任何符合产物契约**的目录工作：
+> `dist/index.html` 内含 `window.GAME = {title, rules, slots, assets}`，以及同目录的 `game.js`。
 
-## Install
-
-```bash
-cp -r skills/game-forge ~/.claude/skills/        # Claude Code
-cp -r skills/game-forge ~/.agents/skills/        # 其他 agent 运行时
-```
-
-## Usage
-
-```bash
-S=~/.claude/skills/game-forge/scripts
-
-node $S/doctor.mjs                                            # 环境自检
-node $S/brief.mjs init --out <游戏目录>/game.brief.json --title "月夜狐灯" --target wechat
-node $S/brief.mjs check --file <游戏目录>/game.brief.json      # 校验需求
-
-# 微信：转换 → 模拟器 → 断言 → 二维码
-node $S/publish.mjs --target wechat --game <游戏目录> --preview
-
-# 网页：打包 → 无头浏览器 → 断言
-node $S/publish.mjs --target web --game <游戏目录>
-```
-
-Exit codes: `0` pass · `1` args/env · `2` build failed · `3` tool failed · `4` **assertion failed**.
-
-## Design notes
-
-- **零改写**：转换器不改游戏代码，浏览器差异全部吸收进 `targets/wechat/wx-shim.js`。
-  Game Studio 重建后重跑转换即可，不需要合并。
-- **断言分软硬**：`fps ≥ N` 是软指标（窗口不在前台会被 Chromium 节流到 ~20），
-  只保留 `fps 未塌方 ≥ 10` 当硬门槛。要严格判定加 `--require-fps`。
-- **兼容性默认拒绝**：扫描到小游戏不支持的 API 就停止转换并给出行号，确认后 `--force` 放行。
-  产出「能编译但黑屏」的包比直接报错糟糕得多。
-
-## Layout
+## 目录
 
 ```
-game-forge/
-├── SKILL.md                     # 路由：需求梳理 → 选 target → 分支
+├── SKILL.md                       # 路由：需求梳理 → 选 target → 分支
 ├── scripts/
-│   ├── doctor.mjs               # 环境自检
-│   ├── brief.mjs                # 需求落盘与校验
-│   ├── publish.mjs              # 编排 + 断言
-│   ├── lib.mjs                  # 共用工具
-│   ├── targets/wechat/          # g2wx 转换器 + wx-shim
-│   └── targets/web/             # 打包 + 无头浏览器验证
+│   ├── doctor.mjs                 # 环境自检
+│   ├── brief.mjs                  # 需求落盘与校验
+│   ├── publish.mjs                # 编排 + 断言
+│   ├── lib.mjs                    # 共用工具
+│   ├── targets/wechat/            # g2wx 转换器 + wx-shim
+│   └── targets/web/               # 打包 + 无头浏览器验证
 └── references/
-    ├── intake.md                # 需求梳理话术与判据
-    ├── wechat-gotchas.md        # 10 个实测坑
-    ├── compat-matrix.md         # API 支持矩阵
-    └── web.md                   # 网页渠道现状与部署待办
+    ├── intake.md                  # 需求梳理话术与判据
+    ├── wechat-gotchas.md          # 10 个实测坑
+    ├── compat-matrix.md           # API 支持矩阵
+    └── web.md                     # 网页渠道现状与部署待办
 ```
+
+## Roadmap
+
+- [ ] 网页渠道部署（rsync / 对象存储），做成可插拔 backend
+- [ ] 微信体验版上传验证（需要正式小游戏 AppID）
+- [ ] 更多品类适配（目前只有 collector 实测跑通）
+- [ ] 工作台形态：侧栏面板列出游戏与各渠道状态，按钮 shell out 到同一套 CLI
+- [ ] CI：把 `publish.mjs` 的断言接进 GitHub Actions
+
+## License
+
+MIT
