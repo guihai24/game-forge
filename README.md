@@ -71,11 +71,15 @@ node scripts/brief.mjs check --file <游戏目录>/game.brief.json
 # 一条命令跑完
 node scripts/publish.mjs --target wechat --game <游戏目录> --preview
 node scripts/publish.mjs --target web    --game <游戏目录>
+
+# 批量：扫工作区里所有带 game.brief.json 的游戏
+node scripts/publish.mjs --all games --targets wechat,web
 ```
 
 退出码：`0` 通过 · `1` 参数/环境 · `2` 构建失败 · `3` 工具失败 · `4` **断言失败** · `5` 目标未实现。
 
 实测（月夜狐灯）：微信 150 秒、网页 15 秒，双双退出码 0。
+批量模式两个游戏串行跑，微信各约 100 秒、网页各约 13 秒，汇总成一张表。
 
 ## 三条设计原则
 

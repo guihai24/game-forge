@@ -39,6 +39,12 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--game') o.game = argv[++i];
+    else if (a === '--all') {
+      const next = argv[i + 1];
+      if (next && !next.startsWith('-')) { o.all = argv[++i]; }
+      else o.all = '.';
+    }
+    else if (a === '--targets') o.targets = argv[++i];
     else if (a === '--target') o.target = argv[++i];
     else if (a === '--brief') o.brief = argv[++i];
     else if (a === '--out') o.out = argv[++i];
@@ -118,12 +124,111 @@ async function runWeb(args) {
   process.exit(0);
 }
 
+/* ---------- 批量模式 ---------- */
+function findGames(root) {
+  const found = [];
+  const skip = new Set([
+    'node_modules', '.git', 'targets', '.pipeline', 'dist',
+    'export', 'assets', '.studio', '.github'
+  ]);
+  (function walk(dir, depth) {
+    if (depth > 4) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+    if (entries.some((e) => e.isFile() && e.name === 'game.brief.json')) {
+      found.push(dir);
+      return;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory() || skip.has(e.name)) continue;
+      walk(path.join(dir, e.name), depth + 1);
+    }
+  })(root, 0);
+  return found.sort();
+}
+
+function readBriefOf(gameDir) {
+  try { return JSON.parse(fs.readFileSync(path.join(gameDir, 'game.brief.json'), 'utf8')); }
+  catch (e) { return null; }
+}
+
+async function runAll(args) {
+  const root = path.resolve(args.all);
+  const games = findGames(root);
+  if (!games.length) fail(1, `${root} 下没有找到任何带 game.brief.json 的游戏目录`);
+
+  const overrideTargets = args.targets
+    ? args.targets.split(',').map((t) => t.trim()).filter(Boolean)
+    : null;
+
+  const rows = [];
+  for (const gameDir of games) {
+    const brief = readBriefOf(gameDir);
+    const name = (brief && brief.title) || path.basename(gameDir);
+    const targets = overrideTargets || [(brief && brief.target) || 'wechat'];
+
+    for (const target of targets) {
+      const started = Date.now();
+      const cliArgs = [path.join(HERE, 'publish.mjs'), '--target', target, '--game', gameDir];
+      if (args.preview && target === 'wechat') cliArgs.push('--preview');
+      if (args.strict) cliArgs.push('--strict');
+      if (args.requireFps) cliArgs.push('--require-fps');
+      if (args.appid) cliArgs.push('--appid', args.appid);
+
+      console.log(`\n━━━ ${name} · ${target} ━━━`);
+      const r = runCli('node', cliArgs);
+      const seconds = ((Date.now() - started) / 1000).toFixed(1);
+      const tail = r.out.trim().split('\n').slice(-6).join('\n');
+      console.log(tail);
+
+      rows.push({
+        name,
+        target,
+        code: r.code,
+        seconds,
+        ok: r.code === 0,
+        detail: r.code === 0 ? '' : (r.out.match(/✗ ([^\n]+)/) || [, `退出码 ${r.code}`])[1]
+      });
+      // 串行执行：多个模拟器窗口同时开会串截图
+      await sleep(1500);
+    }
+  }
+
+  /* 汇总 */
+  const width = Math.max(...rows.map((r) => [...r.name].reduce((n, c) => n + (c.charCodeAt(0) > 127 ? 2 : 1), 0)), 8);
+  const pad = (str, w) => {
+    const len = [...str].reduce((n, c) => n + (c.charCodeAt(0) > 127 ? 2 : 1), 0);
+    return str + ' '.repeat(Math.max(0, w - len));
+  };
+  console.log('\n════════ 汇总 ════════');
+  console.log(`${pad('游戏', width)}  ${pad('渠道', 8)} ${pad('结果', 8)} ${pad('耗时', 8)} 备注`);
+  console.log('─'.repeat(width + 40));
+  for (const r of rows) {
+    console.log(`${pad(r.name, width)}  ${pad(r.target, 8)} ${pad(r.ok ? '✅ 通过' : '❌ 失败', 8)} ${pad(r.seconds + 's', 8)} ${r.detail}`);
+  }
+  const passed = rows.filter((r) => r.ok).length;
+
+  const artifactDir = path.join(root, '.pipeline');
+  fs.mkdirSync(artifactDir, { recursive: true });
+  fs.writeFileSync(path.join(artifactDir, 'all-report.json'),
+    JSON.stringify({ root, ranAt: new Date().toISOString(), rows }, null, 2));
+
+  console.log(`\n${passed}/${rows.length} 通过`);
+  if (passed === rows.length) process.exit(0);
+  process.exit(rows.some((r) => r.code === 4) ? 4 : 3);
+}
+
 /* ---------- 主流程 ---------- */
 async function main() {
   const args = parseArgs(process.argv);
-  if (args.help || !args.game) {
-    console.log('用法: node publish.mjs --target wechat|web --game <游戏目录> [--appid ID] [--preview] [--upload] [--strict]');
+  if (args.help || (!args.game && !args.all)) {
+    console.log('用法:\n  node publish.mjs --target wechat|web --game <游戏目录> [--preview] [--strict] [--require-fps]\n  node publish.mjs --all [根目录] [--targets wechat,web] [--preview]');
     process.exit(args.help ? 0 : 1);
+  }
+
+  if (args.all) {
+    await runAll(args);
+    return;
   }
 
   const target = args.target || 'wechat';

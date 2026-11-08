@@ -88,6 +88,17 @@ node scripts/publish.mjs --target wechat --game <游戏目录> --preview
 | `--min-fps 50` | 覆盖简报里的帧率门槛 |
 | `--keep-open` | 结束后不关项目窗口 |
 
+### 批量
+
+```bash
+node scripts/publish.mjs --all <根目录> [--targets wechat,web] [--preview]
+```
+
+扫描根目录下所有含 `game.brief.json` 的游戏目录，逐个跑，输出汇总表并写 `.pipeline/all-report.json`。
+
+**必须串行**——多个模拟器窗口同时开会让 `simulator_screenshot` 串图（见已知坑第 3 条）。
+脚本在每两个之间关窗口并等待，不要改成并发。
+
 ### 手工分步（排查时用）
 
 ```bash
