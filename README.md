@@ -101,6 +101,18 @@ node scripts/publish.mjs --all games --targets wechat,web
 
 确认风险后 `--force` 放行。产出「能编译但黑屏」的包，比直接报错糟糕得多。
 
+## 工作台插件（实验）
+
+`plugin/` 下是一个 DSH 插件，在右栏注册常驻 tab「游戏工坊」，列出工作区里每个游戏
+在微信/网页两个渠道的最新状态（读 `.pipeline/report.json` 与 `targets/*` 的构建记录）。
+
+```bash
+dsh plugin --profile <name> add file:$(pwd)/plugin   # 或走插件管理器装 file: 路径
+```
+
+设计约束：**面板只渲染，不做事**。所有扫描在服务端命令 `/game-forge scan` 里完成，
+面板通过 `runCommand` 取 JSON。插件坏了，终端里的 `publish.mjs` 照样能跑。
+
 ## 作为技能安装
 
 ```bash

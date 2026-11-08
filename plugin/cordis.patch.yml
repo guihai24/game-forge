@@ -1,0 +1,4 @@
+# game-forge 工作台：把面板挂进 DSH 右栏
+- insert:
+    - id: dsh-game-forge
+      name: '@guihai24/dsh-game-forge'
