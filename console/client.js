@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'game-console';
     const NS = '@guihai24/dsh-game-console';
 
-    const inject = ['slots', 'locale', 'remote', 'remote.commands'];
+    const inject = ['slots', 'locale', 'remote', 'remote.commands', 'sessions'];
 
     /* ---------- 图标 ---------- */
     function PanelIcon(props) {
@@ -105,13 +105,31 @@ window.__ModuleLoader__.load({
       const runCommand = props.runCommand;
       const [state, setState] = useState({ loading: true, games: [], tasks: [], error: null });
 
+      // 主区面板从侧栏打开时没有 sessionId，需要自己找当前会话。
+      // 官方做法：ctx.sessions.list 里 retainedBy.mainView > 0 的那条。
+      const resolveSession = useCallback(() => {
+        if (sessionId) return sessionId;
+        try {
+          const list = props.sessions && props.sessions.list;
+          const rows = list && list.getSnapshot ? list.getSnapshot().byId : null;
+          if (rows) {
+            const current = Object.values(rows).find((row) => (row.retainedBy && row.retainedBy.mainView) > 0);
+            if (current && current.id) return current.id;
+            const any = Object.values(rows)[0];
+            if (any && any.id) return any.id;
+          }
+        } catch (e) { /* 落到下面的报错 */ }
+        return '';
+      }, [sessionId, props.sessions]);
+
       const call = useCallback(async (input) => {
-        if (!runCommand || !sessionId) throw new Error('命令通道不可用');
-        const res = await runCommand(sessionId, input);
+        if (!runCommand) throw new Error('命令通道不可用');
+        const sid = resolveSession();
+        if (!sid) throw new Error('没有可用会话：先在左侧点开一个会话，再回到工作室');
+        const res = await runCommand(sid, input);
         if (!res || !res.ok) throw new Error((res && res.text) || '命令失败');
-        const data = JSON.parse(res.text);
-        return data;
-      }, [runCommand, sessionId]);
+        return JSON.parse(res.text);
+      }, [runCommand, resolveSession]);
 
       const load = useCallback(async () => {
         setState((s) => ({ ...s, loading: true, error: null }));
@@ -258,7 +276,8 @@ window.__ModuleLoader__.load({
           locale: NS,
           inject: (sessionId) => ({
             consoleSessionId: typeof sessionId === 'string' ? sessionId : '',
-            runCommand
+            runCommand,
+            sessions: ctx.sessions
           })
         }, ConsolePanel);
       }), 'game-console: main panel');
