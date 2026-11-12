@@ -163,6 +163,7 @@ function scanAll(root) {
         orientation: state.orientation || 'landscape',
         genre: state.genre || '',
         channels: state.channels || {},
+        tasks: state.tasks || [],
         revenue: state.revenue || {},
         built: state.built || null,
         updatedAt: state.updatedAt || null

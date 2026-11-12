@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'game-console';
     const NS = '@guihai24/dsh-game-console';
 
-    const inject = ['slots', 'locale', 'remote', 'remote.commands', 'layout'];
+    const inject = ['slots', 'locale', 'remote', 'remote.commands'];
 
     /* ---------- 图标 ---------- */
     function PanelIcon(props) {
@@ -108,9 +108,8 @@ window.__ModuleLoader__.load({
       const call = useCallback(async (input) => {
         if (!runCommand || !sessionId) throw new Error('命令通道不可用');
         const res = await runCommand(sessionId, input);
-        if (!res || !res.text) throw new Error('命令无返回');
+        if (!res || !res.ok) throw new Error((res && res.text) || '命令失败');
         const data = JSON.parse(res.text);
-        if (data && data.kind === 'error') throw new Error(String(data.text));
         return data;
       }, [runCommand, sessionId]);
 
@@ -236,6 +235,22 @@ window.__ModuleLoader__.load({
 
     /* ---------- 注册 ---------- */
     function apply(ctx) {
+      // 和旧插件同一套命令通道：execute(sessionId, "/命令 参数", [])
+      // 返回值 { ok, value: { result: { kind, text } } }
+      const runCommand = async (sessionId, input) => {
+        try {
+          const result = await ctx.remote.commands.execute(sessionId, `/game-console ${input}`, []);
+          if (!result || !result.ok) {
+            return { ok: false, text: (result && result.error && result.error.message) || '命令失败' };
+          }
+          const value = result.value && result.value.result !== undefined ? result.value.result : result.value;
+          if (value === undefined) return { ok: false, text: '命令在当前会话不可用' };
+          return { ok: value.kind === 'success', text: String(value.text !== undefined ? value.text : '') };
+        } catch (error) {
+          return { ok: false, text: error instanceof Error ? error.message : String(error) };
+        }
+      };
+
       ctx.effect(() => ctx.slots.inject('main', function* () {
         yield ctx.slots.register({
           name: 'main',
@@ -243,7 +258,7 @@ window.__ModuleLoader__.load({
           locale: NS,
           inject: (sessionId) => ({
             consoleSessionId: typeof sessionId === 'string' ? sessionId : '',
-            runCommand: ctx.remote && ctx.remote.commands ? (sid, input) => ctx.remote.commands.run(sid, input) : null
+            runCommand
           })
         }, ConsolePanel);
       }), 'game-console: main panel');
