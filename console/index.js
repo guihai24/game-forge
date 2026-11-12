@@ -1,19 +1,24 @@
-/* 服务端：扫工作区、读台账、把待办算出来。
+/* 服务端：扫工作区、读台账、跑引擎任务。
  *
- * 命令：/game-console <scan|state|tasks|set-stage> [json]
- *   scan                        返回 { root, games: [...], tasks: [...] }
+ * 命令：/game-console <scan|state|tasks|set-stage|run|job> [json]
+ *   scan                        返回 { root, games: [...], tasks: [...], job }
  *   state {"project":"games/x"} 返回单款完整 state
  *   set-stage {"project":"...","channel":"wechat","stage":"review","status":"done"}
  *                               改一个阶段的状态并落盘
+ *   run {"project":"games/x","target":"wechat|web"}  后台跑引擎，立即返回 jobId
+ *   job                         返回当前任务进度（面板轮询这个）
  *
  * 设计约束（沿用旧插件踩过的坑）：
- *   - 面板只渲染，不做事。扫描、聚合全在这里。
- *   - 任务进度写工作区文件，不靠命令轮询（命令会污染会话）。
+ *   - 面板只渲染，不做事。扫描、聚合、起任务全在这里。
+ *   - 进度写工作区文件 .forge/job.json，面板读文件，不用命令轮询（命令会污染会话）。
+ *   - 任务串行：多个模拟器窗口同时开会串截图。
  *   - 只读 Game Studio 的产物，不 import 它。
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { spawn } from 'node:child_process';
 
 export const name = '@guihai24/dsh-game-console';
 export const inject = ['workingDirectory'];
@@ -229,13 +234,123 @@ function setStage(root, payload) {
   return { project, channel, stage: stageId, status };
 }
 
+/* ---------- 引擎任务 ---------- */
+// 一次只跑一个：多个模拟器窗口同时开会串截图（实测踩过的坑）。
+let running = null;
+
+function engineCli() {
+  const candidates = [
+    process.env.GAME_FORGE_CLI,
+    path.join(os.homedir(), 'src', 'game-forge', 'engine', 'bin', 'game-forge.mjs')
+  ].filter(Boolean);
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) return c; } catch (e) { /* 下一个 */ }
+  }
+  return null;
+}
+
+function jobFile(root) {
+  return path.join(root, '.game-console', 'job.json');
+}
+
+function jobState(root) {
+  return readJson(jobFile(root)) || { running: null, last: null };
+}
+
+function writeJob(root, value) {
+  writeJson(jobFile(root), value);
+}
+
+function startRun(root, payload) {
+  if (running) {
+    throw new Error(`已有任务在跑（${running.id}）：${running.project}。模拟器串行，等它结束。`);
+  }
+  const cli = engineCli();
+  if (!cli) throw new Error('找不到引擎：设置 GAME_FORGE_CLI，或把仓库放在 ~/src/game-forge');
+
+  const project = String(payload.project || '');
+  const target = String(payload.target || 'wechat');
+  if (!['wechat', 'web'].includes(target)) throw new Error(`未知目标 "${target}"`);
+  const dir = path.resolve(root, project);
+  if (!dir.startsWith(path.resolve(root))) throw new Error('项目路径越界');
+  if (!fs.existsSync(path.join(dir, 'game.brief.json'))) throw new Error(`${project} 不是游戏目录`);
+
+  const id = `job_${Date.now().toString(36)}`;
+  const before = jobState(root);
+  const job = {
+    id, project, target, status: 'running',
+    phase: 0, total: 0, line: '启动…',
+    startedAt: new Date().toISOString(), endedAt: null, code: null,
+    log: []
+  };
+  running = job;
+  writeJob(root, { running: job, last: before.last });
+
+  const args = [cli, 'build', '--target', target, '--game', dir];
+  const child = spawn(process.execPath, args, {
+    cwd: dir,
+    env: { ...process.env, NO_COLOR: '1' },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  let dirty = false;
+  const flush = () => {
+    if (!dirty) return;
+    dirty = false;
+    writeJob(root, { running: job, last: before.last });
+  };
+  let timer = setInterval(flush, 400);
+
+  const onData = (buf) => {
+    for (const raw of String(buf).split('\n')) {
+      const line = raw.trim();
+      if (!line) continue;
+      job.line = line;
+      job.log.push(line);
+      if (job.log.length > 300) job.log.shift();
+      const m = /^\[(\d+)\/(\d+)\]/.exec(line);
+      if (m) { job.phase = Number(m[1]); job.total = Number(m[2]); }
+      dirty = true;
+    }
+  };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+
+  const finish = (code, extraError) => {
+    clearInterval(timer);
+    job.code = code;
+    job.status = code === 0 ? 'passed' : (code === null ? 'error' : 'failed');
+    job.endedAt = new Date().toISOString();
+    const err = extraError || job.log.slice().reverse().find((l) => l.startsWith('✗'));
+    if (code !== 0 && err) job.error = err.slice(0, 240);
+    running = null;
+    writeJob(root, { running: null, last: job });
+  };
+  child.on('close', (code) => finish(code));
+  child.on('error', (e) => finish(null, String(e && e.message ? e.message : e)));
+
+  job.cancel = () => { try { child.kill('SIGTERM'); } catch (e) { /* 忽略 */ } };
+  return job;
+}
+
+function publicJob(job) {
+  if (!job) return null;
+  return {
+    id: job.id, project: job.project, target: job.target,
+    status: job.status, phase: job.phase, total: job.total,
+    line: job.line, error: job.error || null,
+    startedAt: job.startedAt, endedAt: job.endedAt, code: job.code,
+    tail: (job.log || []).slice(-3)
+  };
+}
+
 /* ---------- 注册 ---------- */
 export function apply(ctx, config = {}) {
   ctx.inject(['commands'], (child) => {
     child.commands.register({
       name: 'game-console',
-      description: 'Game console: scan workspace, read ledger, list pending human tasks',
-      input: { hint: '<scan|state|set-stage|tasks> [json]' },
+      description: 'Game console: scan workspace, read ledger, list pending human tasks, run the build pipeline',
+      input: { hint: '<scan|state|set-stage|tasks|run|job> [json]' },
       async handler({ agent, rawInput }) {
         try {
           const input = String(rawInput || '').trim();
@@ -246,7 +361,21 @@ export function apply(ctx, config = {}) {
 
           if (action === 'scan') {
             const { games, tasks } = scanAll(root);
-            return { kind: 'success', text: JSON.stringify({ root, games, tasks }) };
+            const job = jobState(root);
+            return { kind: 'success', text: JSON.stringify({ root, games, tasks, job: publicJob(job.running || job.last), jobRunning: Boolean(job.running) }) };
+          }
+          if (action === 'job') {
+            const job = jobState(root);
+            return { kind: 'success', text: JSON.stringify({ job: publicJob(job.running || job.last), running: Boolean(job.running) }) };
+          }
+          if (action === 'run') {
+            const job = startRun(root, payload);
+            return { kind: 'success', text: JSON.stringify({ jobId: job.id, job: publicJob(job) }) };
+          }
+          if (action === 'cancel') {
+            if (!running) return { kind: 'error', text: '没有在跑的任务' };
+            running.cancel();
+            return { kind: 'success', text: JSON.stringify({ cancelled: running.id }) };
           }
           if (action === 'tasks') {
             const { tasks } = scanAll(root);

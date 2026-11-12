@@ -73,6 +73,10 @@ window.__ModuleLoader__.load({
 .gc-it .ic{flex:none;width:16px;text-align:center}
 .gc-it .go{margin-left:auto;align-self:center;flex:none}
 .gc-empty{padding:28px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px}
+.gc-job{border:1px solid var(--dsw-alias-border-l2);border-radius:9px;overflow:hidden;margin-bottom:16px}
+.gc-job .hd{padding:8px 12px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l2);font-size:12px;font-weight:500;display:flex;align-items:center;gap:7px}
+.gc-jobline{font-size:11.5px;font-family:ui-monospace,monospace;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gc-btn:disabled{opacity:.4;cursor:default}
 .gc-hint{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin-top:14px;line-height:1.7}
 .gc-chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--dsw-alias-border-l3);margin-right:4px;white-space:nowrap}
 .gc-chip.done{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}
@@ -139,7 +143,7 @@ window.__ModuleLoader__.load({
         setState((s) => ({ ...s, loading: true, error: null }));
         try {
           const data = await call('scan');
-          setState({ loading: false, games: data.games || [], tasks: data.tasks || [], error: null });
+          setState({ loading: false, games: data.games || [], tasks: data.tasks || [], error: null, job: data.job || null, jobRunning: Boolean(data.jobRunning) });
         } catch (error) {
           setState({ loading: false, games: [], tasks: [], error: String(error.message || error) });
         }
@@ -147,8 +151,35 @@ window.__ModuleLoader__.load({
 
       useEffect(() => { load(); }, [load]);
 
+      // 有任务在跑时轮询 job：读服务端写出的文件状态，不靠命令轮询（会污染会话）。
+      // 这里仍是命令（server 读文件后返回），但频率低、只在跑任务时发生。
+      useEffect(() => {
+        if (!state.jobRunning) return undefined;
+        const timer = setInterval(async () => {
+          try {
+            const data = await call('job');
+            if (!data.running) {
+              // 任务结束：拉一次全量，状态和构建产物都会变
+              await load();
+            } else {
+              setState((s) => ({ ...s, job: data.job }));
+            }
+          } catch (e) { /* 下一轮再试 */ }
+        }, 1500);
+        return () => clearInterval(timer);
+      }, [state.jobRunning, call, load]);
+
+      const startBuild = useCallback(async (project, target) => {
+        try {
+          const data = await call(`run ${JSON.stringify({ project, target })}`);
+          setState((s) => ({ ...s, job: data.job, jobRunning: true }));
+        } catch (error) {
+          setState((s) => ({ ...s, error: String((error && error.message) || error) }));
+        }
+      }, [call]);
+
       const stats = useMemo(() => {
-        const games = state.games;
+        const games = Array.isArray(state.games) ? state.games : [];
         const live = games.filter((g) => Object.values(g.state.channels || {}).some(
           (c) => (c.stages || []).length && c.stages.every((s) => s.status === 'done' || s.status === 'skipped')));
         const inReview = games.filter((g) => Object.values(g.state.channels || {}).some(
@@ -163,7 +194,7 @@ window.__ModuleLoader__.load({
           total: games.length,
           live: live.length,
           review: inReview.length,
-          tasks: state.tasks.length,
+          tasks: Array.isArray(state.tasks) ? state.tasks.length : 0,
           income
         };
       }, [state]);
@@ -197,15 +228,18 @@ window.__ModuleLoader__.load({
           h('div', { className: 'gc-board' },
             h('table', null,
               h('thead', null, h('tr', null,
-                h('th', { style: { width: '30%' } }, '游戏'),
-                CHANNELS.map((c) => h('th', { key: c.id, style: { width: '17%' } }, c.label)),
-                h('th', null, '备注')
+                h('th', { style: { width: '26%' } }, '游戏'),
+                CHANNELS.map((c) => h('th', { key: c.id, style: { width: '15%' } }, c.label)),
+                h('th', null, '备注'),
+                h('th', { style: { width: '120px', textAlign: 'right' } }, '')
               )),
               h('tbody', null,
                 state.games.length === 0
-                  ? h('tr', null, h('td', { colspan: 5 }, h('div', { className: 'gc-empty' }, '工作区里还没有游戏。用 Game Studio 做一个，或把已有工程放进工作区。')))
+                  ? h('tr', null, h('td', { colspan: 6 }, h('div', { className: 'gc-empty' }, '工作区里还没有游戏。用 Game Studio 做一个，或把已有工程放进工作区。')))
                   : state.games.map((g) => {
                     const channels = g.state.channels || {};
+                    const busy = state.jobRunning && state.job && state.job.project === g.project;
+                    const anyBusy = state.jobRunning;
                     return h('tr', { key: g.project },
                       h('td', null,
                         h('div', { className: 'gc-name' }, g.state.title || g.project),
@@ -220,10 +254,51 @@ window.__ModuleLoader__.load({
                       }),
                       h('td', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 } },
                         g.state.inferred ? '尚未建台账' : (g.state.offline ? '单机' : '联网')
+                      ),
+                      h('td', { style: { textAlign: 'right', whiteSpace: 'nowrap' } },
+                        busy
+                          ? h('span', { className: 'gc-st gc-run' }, `◐ ${state.job.total ? `${state.job.phase}/${state.job.total}` : '…'}`)
+                          : h(Fragment, null,
+                            h('button', {
+                              className: 'gc-btn sm',
+                              disabled: anyBusy,
+                              title: anyBusy ? '已有任务在跑（模拟器串行）' : '转换 + 试玩 + 断言 + 截图',
+                              onClick: () => startBuild(g.project, 'wechat')
+                            }, '构建'),
+                            h('button', {
+                              className: 'gc-btn sm',
+                              style: { marginLeft: 6 },
+                              disabled: anyBusy,
+                              title: anyBusy ? '已有任务在跑' : '打成单文件 HTML 并验证',
+                              onClick: () => startBuild(g.project, 'web')
+                            }, '网页')
+                          )
                       )
                     );
                   })
               )
+            )
+          ),
+
+          state.job && h('div', {
+            className: 'gc-job',
+            style: state.job.status === 'failed' ? { borderColor: 'var(--dsw-alias-state-error-primary)' } : undefined
+          },
+            h('div', { className: 'hd' },
+              h('span', null,
+                state.jobRunning ? '正在跑 · ' : (state.job.status === 'passed' ? '✓ 已完成 · ' : '✗ 失败 · '),
+                (state.job.project || '').replace(/^games\//, ''),
+                ' → ',
+                state.job.target
+              ),
+              state.jobRunning && state.job.total
+                ? h('span', { style: { marginLeft: 'auto', fontWeight: 400, color: 'var(--dsw-alias-label-tertiary)' } },
+                  `${state.job.phase}/${state.job.total}`)
+                : null
+            ),
+            h('div', { style: { padding: '8px 12px' } },
+              h('div', { className: 'gc-jobline' }, state.job.line || ''),
+              state.job.error && h('div', { className: 'gc-jobline', style: { color: 'var(--dsw-alias-state-error-primary)' } }, state.job.error)
             )
           ),
 
