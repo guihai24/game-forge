@@ -90,9 +90,13 @@ window.__ModuleLoader__.load({
     function stageSummary(ch) {
       if (!ch || !ch.stages || !ch.stages.length) return null;
       const active = ch.stages.find((s) => s.status === 'active');
-      const failed = ch.stages.find((s) => s.status === 'failed');
+      const failed = ch.stages.find((s) => s.status === 'failed' || s.status === 'blocked');
       const allDone = ch.stages.every((s) => s.status === 'done' || s.status === 'skipped');
-      if (failed) return { tone: 'err', mark: '✕', text: failed.label + (failed.note ? '' : '') };
+      if (failed) {
+        // 失败/受阻要显眼：说清卡在哪一步，并带上原因的前半句
+        const why = failed.note ? ` · ${String(failed.note).split(/[。；\n]/)[0].slice(0, 28)}` : '';
+        return { tone: 'err', mark: failed.status === 'blocked' ? '⊘' : '✕', text: failed.label + why };
+      }
       if (allDone) return { tone: 'ok', mark: '●', text: '已上线' };
       if (active) return { tone: active.automated === false ? 'warn' : 'run', mark: '◐', text: active.label };
       const pending = ch.stages.filter((s) => s.status === 'pending').length;

@@ -104,13 +104,29 @@ function inferState(dir, brief) {
   };
 }
 
+function fillBuilt(dir, chain) {
+  if (chain.built) return chain;
+  const reportFile = path.join(dir, '.pipeline', 'report.json');
+  const report = readJson(reportFile);
+  const web = readJson(path.join(dir, 'targets', 'web', 'web-manifest.json'));
+  const wx = readJson(path.join(dir, 'targets', 'wechat', 'g2wx-report.json'));
+  let at = null;
+  try { at = fs.statSync(reportFile).mtime.toISOString(); } catch (e) { /* 没跑过 */ }
+  chain.built = {
+    wechat: wx ? { bytes: wx.packageBytes } : null,
+    web: web ? { bytes: web.bytes } : null,
+    lastRun: report ? { ok: report.ok === true, target: report.target, at } : null
+  };
+  return chain;
+}
+
 function statePath(dir) {
   return path.join(dir, '.forge', 'state.json');
 }
 
 function loadState(dir) {
   const saved = readJson(statePath(dir));
-  if (saved) return saved;
+  if (saved) return fillBuilt(dir, saved);
   const brief = readJson(path.join(dir, 'game.brief.json'));
   return inferState(dir, brief);
 }
