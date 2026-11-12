@@ -1,0 +1,38 @@
+{
+  "name": "@guihai24/dsh-game-console",
+  "version": "0.1.0",
+  "description": "Game Studio 控制台：跨游戏、跨渠道的工作室看板与上架台账",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "package.json"],
+  "keywords": ["dsh", "dsh-plugin", "game", "publishing"],
+  "engines": { "node": ">=20" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
+    }
+  },
+  "dshHostRuntime": {
+    "server": {
+      "requiredServices": ["tools", "workingDirectory"],
+      "optionalServices": ["commands"]
+    },
+    "client": {
+      "requiredServices": ["slots", "locale", "remote", "remote.workspaceFiles", "remote.commands", "layout"],
+      "requiredPackages": { "react": "^18.2.0" }
+    }
+  }
+}

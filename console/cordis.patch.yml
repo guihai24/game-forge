@@ -1,0 +1,6 @@
+# game-console bundle patch：只挂控制台自己。
+# 引擎（game-forge-engine）不在这里加载——它是磁盘上的 CLI，由控制台按需要 spawn。
+# GAME_STUDIO 由 profile 单独安装，本插件只读它的产物，不依赖它加载。
+- insert:
+    - id: dsh-game-console
+      name: '@guihai24/dsh-game-console'
