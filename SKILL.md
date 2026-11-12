@@ -20,15 +20,15 @@ related-skills:
 
 ## 第一步：需求梳理（不能跳过）
 
-用户一句话往往只有"做个 XXX 的游戏"。先按 `references/intake.md` 的三层问题补齐，
+用户一句话往往只有"做个 XXX 的游戏"。先按 `engine/references/intake.md` 的三层问题补齐，
 **不要跳过渠道这一层**——它决定后面整条路径。
 
 问完把结论写进 `<游戏目录>/game.brief.json`：
 
 ```bash
-node scripts/brief.mjs init --out <游戏目录>/game.brief.json --title <名字> --target wechat
+node engine/scripts/brief.mjs init --out <游戏目录>/game.brief.json --title <名字> --target wechat
 # 然后补全 genre / rules / acceptance
-node scripts/brief.mjs check --file <游戏目录>/game.brief.json
+node engine/scripts/brief.mjs check --file <游戏目录>/game.brief.json
 ```
 
 `brief.json` 不是文档，是**断言来源**：后面 `publish.mjs` 直接读 `acceptance`
@@ -50,7 +50,7 @@ node scripts/brief.mjs check --file <游戏目录>/game.brief.json
 | target | 打包 | 验证 | 部署 |
 |--------|------|------|------|
 | `wechat` | ✅ | ✅ 模拟器 + 状态日志断言 | ✅ 预览；上传待验证 |
-| `web` | ✅ 单文件 HTML | ✅ 无头浏览器 + 同一套断言 | ⏸ 待定（见 `references/web.md`） |
+| `web` | ✅ 单文件 HTML | ✅ 无头浏览器 + 同一套断言 | ⏸ 待定（见 `engine/references/web.md`） |
 
 两个渠道**共用同一套验收标准**（读 `brief.acceptance`），只是执行器不同：
 微信读 console 状态日志，网页直接 `page.evaluate(window.__gameState)`。
@@ -60,7 +60,7 @@ node scripts/brief.mjs check --file <游戏目录>/game.brief.json
 ### 先自检
 
 ```bash
-node scripts/doctor.mjs
+node engine/scripts/doctor.mjs
 ```
 
 检查 Node、脚本完整性、无头 Chrome、`wechatide`、开发者工具 skill 版本、登录态、小游戏 AppID。
@@ -69,7 +69,7 @@ node scripts/doctor.mjs
 ### 一条命令
 
 ```bash
-node scripts/publish.mjs --target wechat --game <游戏目录> --preview
+node engine/scripts/publish.mjs --target wechat --game <游戏目录> --preview
 ```
 
 依次：转换（带调试日志）→ 导入 → 开模拟器 → 等启动 → 点击开始 → 拖摇杆 →
@@ -91,7 +91,7 @@ node scripts/publish.mjs --target wechat --game <游戏目录> --preview
 ### 批量
 
 ```bash
-node scripts/publish.mjs --all <根目录> [--targets wechat,web] [--preview]
+node engine/scripts/publish.mjs --all <根目录> [--targets wechat,web] [--preview]
 ```
 
 扫描根目录下所有含 `game.brief.json` 的游戏目录，逐个跑，输出汇总表并写 `.pipeline/all-report.json`。
@@ -116,7 +116,7 @@ wechatide -c <clientName> simulator_screenshot --project <out>
 ## 网页分支
 
 ```bash
-node scripts/publish.mjs --target web --game <游戏目录>
+node engine/scripts/publish.mjs --target web --game <游戏目录>
 ```
 
 打包（复制 Game Studio 的 `dist/index.html`，并体检"是否自包含"）+ 无头浏览器试玩 + 断言 + 截图。
@@ -124,7 +124,7 @@ node scripts/publish.mjs --target web --game <游戏目录>
 产物：`<游戏目录>/targets/web/index.html`（约 120 KB，零外链、零网络请求）。
 让用户直接双击就能玩，或丢到任意静态托管上。
 
-**部署未实现**——各家的服务器形态差异太大，见 `references/web.md`。
+**部署未实现**——各家的服务器形态差异太大，见 `engine/references/web.md`。
 
 ## 铁律：不修改游戏代码
 
@@ -169,11 +169,11 @@ node scripts/publish.mjs --target web --game <游戏目录>
 ```
 
 产出「能编译但黑屏」的包，比直接报错糟糕得多。确认风险后 `--force` 放行，
-报告里会记 `forced: true`。清单见 `references/compat-matrix.md`。
+报告里会记 `forced: true`。清单见 `engine/references/compat-matrix.md`。
 
 ## 已知坑
 
-都在 `references/wechat-gotchas.md`，改 shim 前务必看。最容易重新踩的三个：
+都在 `engine/references/wechat-gotchas.md`，改 shim 前务必看。最容易重新踩的三个：
 
 1. `GameGlobal.window` 是**只读 getter**，只能增补不能替换
 2. 运行时 `innerWidth/innerHeight` 是 **1×1**、`devicePixelRatio` 是 **null**
@@ -195,18 +195,18 @@ node scripts/publish.mjs --target web --game <游戏目录>
 
 | 路径 | 作用 |
 |------|------|
-| `scripts/doctor.mjs` | 环境自检 |
-| `scripts/brief.mjs` | 需求落盘与校验 |
-| `scripts/publish.mjs` | 编排 + 断言 |
-| `scripts/lib.mjs` | 共用的 CLI / JSON 工具 |
-| `scripts/targets/wechat/g2wx.mjs` | 转换器 |
-| `scripts/targets/wechat/wx-shim.js` | 运行时适配层 |
-| `scripts/targets/web/build.mjs` | 网页打包（复制 + 自包含体检） |
-| `scripts/targets/web/verify.mjs` | 网页试玩与断言 |
-| `references/intake.md` | 需求梳理话术与判据 |
-| `references/wechat-gotchas.md` | 实测踩过的坑 |
-| `references/compat-matrix.md` | API 支持矩阵 |
-| `references/web.md` | 网页渠道现状与部署待办 |
+| `engine/scripts/doctor.mjs` | 环境自检 |
+| `engine/scripts/brief.mjs` | 需求落盘与校验 |
+| `engine/scripts/publish.mjs` | 编排 + 断言 |
+| `engine/scripts/lib.mjs` | 共用的 CLI / JSON 工具 |
+| `engine/scripts/targets/wechat/g2wx.mjs` | 转换器 |
+| `engine/scripts/targets/wechat/wx-shim.js` | 运行时适配层 |
+| `engine/scripts/targets/web/build.mjs` | 网页打包（复制 + 自包含体检） |
+| `engine/scripts/targets/web/verify.mjs` | 网页试玩与断言 |
+| `engine/references/intake.md` | 需求梳理话术与判据 |
+| `engine/references/wechat-gotchas.md` | 实测踩过的坑 |
+| `engine/references/compat-matrix.md` | API 支持矩阵 |
+| `engine/references/web.md` | 网页渠道现状与部署待办 |
 
 ## 依赖
 

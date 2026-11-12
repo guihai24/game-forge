@@ -1,0 +1,12 @@
+{
+  "name": "game-forge-engine",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "确定性交付流水线：游戏目录 → 渠道产物 → 试玩断言 → 上传。可脱离 agent 单独运行。",
+  "bin": { "game-forge": "./bin/game-forge.mjs" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

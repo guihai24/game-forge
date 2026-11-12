@@ -1,0 +1,11 @@
+{
+  "name": "game-forge-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": ["engine", "console"],
+  "scripts": {
+    "doctor": "node engine/bin/game-forge.mjs doctor",
+    "build:wechat": "node engine/bin/game-forge.mjs build --target wechat",
+    "build:web": "node engine/bin/game-forge.mjs build --target web"
+  }
+}

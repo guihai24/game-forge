@@ -1,5 +1,22 @@
 # game-forge
 
+**确定性交付流水线**：一句话的游戏需求 → 能交付的成品 → 各渠道产物。
+分为两层，同一个仓库、两个包：
+
+| 目录 | 包名 | 是什么 |
+|---|---|---|
+| `engine/` | `game-forge-engine` | 引擎。转换、试玩断言、截图、上传。**可脱离 agent / DSH 单独跑**，退出码说话。 |
+| `console/` | `@guihai24/dsh-game-console` | DSH 插件。看板、渠道编排、待办、台账。只加载这个。 |
+
+游戏由 `@zseven-w/dsh-game-studio` 生成，本仓库不重复造生成器。
+
+```bash
+game-forge build  --game <目录> --target wechat --preview   # 转换+试玩+断言+截图+二维码
+game-forge upload --game <目录> --version 1.0.0             # miniprogram-ci 上传开发版
+game-forge doctor                                           # 环境自检
+```
+
+
 **一句话的游戏想法 → 能交付的成品。** 不是"生成游戏"的包装，而是一条带断言的交付流水线：
 需求梳理 → 生成 → 按渠道转换 → 自动试玩验证 → 预览/发布。
 
@@ -43,7 +60,7 @@
 | 验证 | 靠人看 | **机器断言**：阶段迁移、帧率、分数 |
 | 可重复 | 每次重来 | 一条命令，退出码说话 |
 
-`SKILL.md` 只负责路由；真正的系统在 `scripts/` 里，能脱离 agent 独立运行，
+`SKILL.md` 只负责路由；真正的系统在 `engine/scripts/` 里，能脱离 agent 独立运行，
 也能进 CI。
 
 ## 两个渠道
@@ -51,7 +68,7 @@
 | target | 打包 | 验证 | 部署 |
 |--------|------|------|------|
 | `wechat` | 小游戏工程（约 170 KB） | 开发者工具模拟器 + console 状态日志 | 预览二维码 ✅；上传体验版 ⏳ 待正式 AppID |
-| `web` | 单文件 HTML（约 120 KB，零外链） | 无头 Chrome + `page.evaluate` | ⏸ 待定，见 [references/web.md](references/web.md) |
+| `web` | 单文件 HTML（约 120 KB，零外链） | 无头 Chrome + `page.evaluate` | ⏸ 待定，见 [references/web.md](engine/references/web.md) |
 
 **同一份 `brief.acceptance`，两个执行器。** 这是两个渠道能共存的根本原因。
 
@@ -61,19 +78,19 @@
 git clone https://github.com/guihai24/game-forge.git
 cd game-forge
 
-node scripts/doctor.mjs                 # 环境自检
+node engine/scripts/doctor.mjs                 # 环境自检
 
 # 需求落盘
-node scripts/brief.mjs init --out <游戏目录>/game.brief.json \
+node engine/scripts/brief.mjs init --out <游戏目录>/game.brief.json \
   --title 月夜狐灯 --genre collect-and-dodge --target wechat --appid wx...
-node scripts/brief.mjs check --file <游戏目录>/game.brief.json
+node engine/scripts/brief.mjs check --file <游戏目录>/game.brief.json
 
 # 一条命令跑完
-node scripts/publish.mjs --target wechat --game <游戏目录> --preview
-node scripts/publish.mjs --target web    --game <游戏目录>
+node engine/scripts/publish.mjs --target wechat --game <游戏目录> --preview
+node engine/scripts/publish.mjs --target web    --game <游戏目录>
 
 # 批量：扫工作区里所有带 game.brief.json 的游戏
-node scripts/publish.mjs --all games --targets wechat,web
+node engine/scripts/publish.mjs --all games --targets wechat,web
 ```
 
 退出码：`0` 通过 · `1` 参数/环境 · `2` 构建失败 · `3` 工具失败 · `4` **断言失败** · `5` 目标未实现。
@@ -84,7 +101,7 @@ node scripts/publish.mjs --all games --targets wechat,web
 ## 三条设计原则
 
 **① 零改写。** 转换器不改游戏代码——`game.js` 原样搬运，浏览器差异全部吸收进
-`scripts/targets/wechat/wx-shim.js`。上游重建后重跑转换即可，不需要合并。
+`engine/scripts/targets/wechat/wx-shim.js`。上游重建后重跑转换即可，不需要合并。
 一旦转换器开始改写游戏代码，每次重建都会变成手工冲突。
 
 **② 断言分软硬。** `fps ≥ N` 是软指标（窗口不在前台会被 Chromium 节流到 ~20），
@@ -101,17 +118,15 @@ node scripts/publish.mjs --all games --targets wechat,web
 
 确认风险后 `--force` 放行。产出「能编译但黑屏」的包，比直接报错糟糕得多。
 
-## 工作台插件（实验）
+## 工作台插件
 
-`plugin/` 下是一个 DSH 插件，在右栏注册常驻 tab「游戏工坊」，列出工作区里每个游戏
-在微信/网页两个渠道的最新状态（读 `.pipeline/report.json` 与 `targets/*` 的构建记录）。
+已迁移到 `console/`（`@guihai24/dsh-game-console`），取代原来挂在右栏的 tab：
+扫描、试玩、预览、上传都搬进看板，右栏不再单独占一个入口。
 
-```bash
-dsh plugin --profile <name> add file:$(pwd)/plugin   # 或走插件管理器装 file: 路径
-```
+旧插件的两条设计约束仍然有效，写在这里免得重踩：
 
-设计约束：**面板只渲染，不做事**。所有扫描在服务端命令 `/game-forge scan` 里完成，
-面板通过 `runCommand` 取 JSON。插件坏了，终端里的 `publish.mjs` 照样能跑。
+- 任务进度不能拿命令轮询——命令每执行一次都会记进会话、显示在对话里。进度应写到工作区文件，面板读文件。
+- `client.js` 按普通脚本加载，不能写 `import` / `export`，要包在 `window.__ModuleLoader__.load({ id, factory(require) { … } })` 里；写错了 DSH 直接启动失败。
 
 ## 作为技能安装
 
@@ -130,7 +145,7 @@ cp -r . ~/.agents/skills/game-forge
 | 能力 | 需要 |
 |------|------|
 | 生成游戏 | DeepSeek Harness + Game Studio 插件 |
-| `wechat` 渠道 | 微信开发者工具（自带 `wechatide` CLI），踩坑记录见 `references/wechat-gotchas.md` |
+| `wechat` 渠道 | 微信开发者工具（自带 `wechatide` CLI），踩坑记录见 `engine/references/wechat-gotchas.md` |
 | `web` 渠道 | Chrome + `playwright-core` |
 | SVG 栅格化 | 无头 Chrome（`CHROME_PATH` 可覆盖） |
 
@@ -141,14 +156,16 @@ cp -r . ~/.agents/skills/game-forge
 
 ```
 ├── SKILL.md                       # 路由：需求梳理 → 选 target → 分支
-├── scripts/
+├── engine/                        # game-forge-engine（可单独跑）
+│   ├── bin/game-forge.mjs         # 统一入口
+│   ├── scripts/
 │   ├── doctor.mjs                 # 环境自检
 │   ├── brief.mjs                  # 需求落盘与校验
 │   ├── publish.mjs                # 编排 + 断言
 │   ├── lib.mjs                    # 共用工具
-│   ├── targets/wechat/            # g2wx 转换器 + wx-shim
+│   ├── targets/wechat/            # g2wx 转换器 + wx-shim + upload-ci
 │   └── targets/web/               # 打包 + 无头浏览器验证
-└── references/
+│   └── references/
     ├── intake.md                  # 需求梳理话术与判据
     ├── wechat-gotchas.md          # 10 个实测坑
     ├── compat-matrix.md           # API 支持矩阵
