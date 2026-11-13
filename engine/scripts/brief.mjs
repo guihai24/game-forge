@@ -19,6 +19,10 @@ const TEMPLATE = {
   title: '',
   genre: '',
   target: 'wechat',
+  // 「势」的输入层：情绪主题会过期，所以不硬编码进规则，只作为每次立项的输入。
+  // 见 references/rules/viral-dna-rules.md §四。
+  emotion_theme: '',
+  trend_evidence: '',
   rules: {},
   acceptance: {
     mustReachPhase: ['playing'],
@@ -44,6 +48,8 @@ function parseArgs(argv) {
     else if (a === '--target') o.target = argv[++i];
     else if (a === '--appid') o.appid = argv[++i];
     else if (a === '--orientation') o.orientation = argv[++i];
+    else if (a === '--emotion-theme') o.emotionTheme = argv[++i];
+    else if (a === '--trend-evidence') o.trendEvidence = argv[++i];
     else if (a === '--notes') o.notes = argv[++i];
     else if (a === '-h' || a === '--help') o.help = true;
   }
@@ -53,6 +59,7 @@ function parseArgs(argv) {
 function usage() {
   console.log(`用法:
   node brief.mjs init  --out <路径> [--title T] [--genre G] [--target wechat|web] [--appid ID] [--orientation landscape|portrait]
+                       [--emotion-theme <情绪主题>] [--trend-evidence <势的依据>]
   node brief.mjs check --file <路径>`);
 }
 
@@ -72,6 +79,8 @@ function init(args) {
   if (args.target) brief.target = args.target;
   if (args.orientation) brief.channel.orientation = args.orientation;
   if (args.appid) brief.channel.appid = args.appid;
+  if (args.emotionTheme) brief.emotion_theme = args.emotionTheme;
+  if (args.trendEvidence) brief.trend_evidence = args.trendEvidence;
   if (args.notes) brief.notes = args.notes;
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(brief, null, 2) + '\n', 'utf8');

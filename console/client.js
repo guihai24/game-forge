@@ -57,6 +57,10 @@ window.__ModuleLoader__.load({
 .gc-board tbody tr:hover td{background:var(--dsw-alias-interactive-bg-hover)}
 .gc-name{font-weight:500}
 .gc-gid{font-size:11px;color:var(--dsw-alias-label-tertiary);font-family:ui-monospace,monospace;margin-top:1px}
+.gc-verdict{font-size:11px;margin-top:2px;line-height:1.5}
+.gc-verdict.good{color:var(--dsw-alias-state-success-primary)}
+.gc-verdict.weak{color:var(--dsw-alias-state-warn-primary)}
+.gc-verdict.bad{color:var(--dsw-alias-state-error-primary)}
 .gc-st{display:inline-flex;align-items:center;gap:5px;font-size:12px}
 .gc-ok{color:var(--dsw-alias-state-success-primary)}
 .gc-warn{color:var(--dsw-alias-state-warn-primary)}
@@ -227,10 +231,10 @@ window.__ModuleLoader__.load({
           h('div', { className: 'gc-board' },
             h('table', null,
               h('thead', null, h('tr', null,
-                h('th', { style: { width: '26%' } }, '游戏'),
-                CHANNELS.map((c) => h('th', { key: c.id, style: { width: '14%' } }, c.label)),
-                h('th', { style: { width: '90px' } }, '自审'),
-                h('th', null, '备注'),
+                h('th', { style: { width: '24%' } }, '游戏 / 值不值得上架'),
+                CHANNELS.map((c) => h('th', { key: c.id, style: { width: '13%' } }, c.label)),
+                h('th', { style: { width: '78px' } }, '合规'),
+                h('th', { style: { width: '78px' } }, '基因'),
                 h('th', { style: { width: '120px', textAlign: 'right' } }, '')
               )),
               h('tbody', null,
@@ -243,7 +247,24 @@ window.__ModuleLoader__.load({
                     return h('tr', { key: g.project },
                       h('td', null,
                         h('div', { className: 'gc-name' }, g.state.title || g.project),
-                        h('div', { className: 'gc-gid' }, g.project)
+                        // 值不值得上架：把合规和基因合起来一句话说完，不用点开
+                        (() => {
+                          const parts = [];
+                          const a = g.state.audit;
+                          if (a) {
+                            const blocks = a.items.filter((i) => i.level === 'BLOCK').length;
+                            parts.push(blocks ? `合规：有 ${blocks} 项 BLOCK` : '合规：通过');
+                          }
+                          if (g.state.viral) parts.push(`基因：${g.state.viral.score}/${g.state.viral.total}`);
+                          if (!parts.length) return h('div', { className: 'gc-gid' }, g.project);
+                          return h('div', {
+                            className: `gc-verdict ${a && a.items.some((i) => i.level === 'BLOCK') ? 'bad' : (g.state.viral && g.state.viral.verdict === 'suggest-drop' ? 'weak' : 'good')}`,
+                            title: g.state.viral ? g.state.viral.summary : ''
+                          }, parts.join('　·　'));
+                        })(),
+                        g.state.probe
+                          ? h('div', { className: 'gc-gid', title: '产物实测（Gate 2）' }, `实测：${g.state.probe.summary}`)
+                          : null
                       ),
                       CHANNELS.map((c) => {
                         // TapTap 没建台账时，用打包产物说明状态：有 zip 就是「已打包」
@@ -280,8 +301,20 @@ window.__ModuleLoader__.load({
                           return h('span', { className: 'gc-st gc-ok' }, '✓');
                         })()
                       ),
-                      h('td', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 } },
-                        g.state.inferred ? '尚未建台账' : (g.state.offline ? '单机' : '联网')
+                      // 基因：Gate 1 打分 + 砍线状态；悬停看每一项
+                      h('td', null,
+                        (() => {
+                          const v = g.state.viral;
+                          if (!v) return h('span', { className: 'gc-st gc-none' }, '—');
+                          const tone = v.verdict === 'suggest-drop' ? 'gc-warn' : 'gc-ok';
+                          const tip = [
+                            `viral-dna ${v.score}/${v.total}`,
+                            ...v.failed.map((i) => `${i.needsHuman ? '?' : '⚠'} ${i.id} ${i.label}：${i.detail}`),
+                            '',
+                            v.summary
+                          ].join('\n');
+                          return h('span', { className: `gc-st ${tone}`, title: tip }, `${v.score}/${v.total}`);
+                        })()
                       ),
                       h('td', { style: { textAlign: 'right', whiteSpace: 'nowrap' } },
                         busy
@@ -308,7 +341,16 @@ window.__ModuleLoader__.load({
                                 ? `自审有 ${g.state.audit.blocked} 项阻断，先改：${g.state.audit.items.filter((i) => i.level === 'BLOCK').map((i) => i.msg).join('；')}`
                                 : '打成 TapTap 合规 zip（一级目录 + index.html，排除 game.json）',
                               onClick: () => startBuild(g.project, 'web', 'package-taptap')
-                            }, 'TT包')
+                            }, 'TT包'),
+                            h('button', {
+                              className: 'gc-btn sm',
+                              style: { marginLeft: 6 },
+                              disabled: anyBusy,
+                              title: anyBusy
+                                ? '已有任务在跑'
+                                : 'Gate 2：起浏览器实测分享/反馈延迟/单局时长/冷启动，不采信 brief 自述',
+                              onClick: () => startBuild(g.project, 'web', 'probe')
+                            }, '实测')
                           )
                       )
                     );
@@ -378,20 +420,17 @@ window.__ModuleLoader__.load({
       // 桌面应用持有写句柄时整块面板会空掉。
       // 全局快照：优先走宿主的 /api/file 路由（同一套鉴权，简单可靠），
       // 再退回 resources.open。两条都失败就当没数据，不抛错。
-      const readGlobal = async () => {
-        const snapshot = globalSnapshotPath();
-        if (!snapshot) return null;
-
+      //
+      // 多实例：桌面应用和 web 实例会各写一份 state.<id>.json，
+      // instances.json 里记着每份的 schema 和时间。挑 schema 最高、最新的那份读，
+      // 这样旧进程写的旧格式不会盖住新字段。
+      const fetchText = async (absPath) => {
         try {
-          const res = await fetch(`/api/file?path=${encodeURIComponent(snapshot)}`, { cache: 'no-store' });
+          const res = await fetch(`/api/file?path=${encodeURIComponent(absPath)}`, { cache: 'no-store' });
           if (res && res.ok) return await res.text();
         } catch (error) { /* 落到下一条 */ }
-
         try {
-          const handle = await ctx.resources.open(
-            `dsh-resource://file/absolute${snapshot}`,
-            {}
-          );
+          const handle = await ctx.resources.open(`dsh-resource://file/absolute${absPath}`, {});
           if (!handle) return null;
           if (typeof handle === 'string') return handle;
           if (handle.data) return new TextDecoder().decode(handle.data);
@@ -412,11 +451,36 @@ window.__ModuleLoader__.load({
         }
       };
 
-      function globalSnapshotPath() {
-        // 服务端把快照写到 ~/.dsh/game-console/state.json，与会话无关。
+      const readGlobal = async () => {
+        const dir = globalSnapshotDir();
+        if (!dir) return null;
+
+        // 1. 读实例清单，挑 schema 最高且最新的
+        const indexText = await fetchText(`${dir}/instances.json`);
+        if (indexText) {
+          try {
+            const index = JSON.parse(indexText);
+            const best = Object.values(index)
+              .filter((e) => e && e.file)
+              .sort((a, b) => (b.schema || 0) - (a.schema || 0) || String(b.at).localeCompare(String(a.at)))[0];
+            if (best) {
+              const text = await fetchText(`${dir}/${best.file}`);
+              if (text) return text;
+            }
+          } catch (e) { /* 清单坏了就退到兼容路径 */ }
+        }
+
+        // 2. 兼容路径：老的单文件快照，只认 schema 够新的
+        const legacy = await fetchText(`${dir}/state.json`);
+        if (legacy) {
+          try { if ((JSON.parse(legacy).schema || 0) > 0) return legacy; } catch (e) { /* 坏 JSON 不采信 */ }
+        }
+        return null;
+      };
+
+      function globalSnapshotDir() {
         const home = osHomeDir();
-        if (!home) return '';
-        return `${home}/.dsh/game-console/state.json`;
+        return home ? `${home}/.dsh/game-console` : '';
       }
 
       /** 客户端的 home 目录：宿主不保证提供，从会话的 cwd 推。 */

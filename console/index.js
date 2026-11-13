@@ -21,6 +21,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 
 import { precheckAll } from '../engine/scripts/precheck-lib.mjs';
+import { scoreBrief, verdictSummary } from '../engine/scripts/viral-dna-lib.mjs';
 
 export const name = '@guihai24/dsh-game-console';
 export const inject = ['workingDirectory', 'sessions'];
@@ -208,6 +209,14 @@ function scanAll(root) {
       }
     } catch (e) { /* 没打过 */ }
     const audit = audits[dir] || null;
+
+    // 基因打分：Gate 1 是纯静态（读 brief），每次扫描都算，代价可忽略。
+    // Gate 2 要起浏览器实测，不能放进 2 秒一次的扫描——结果由 probe 动作写进
+    // <游戏目录>/.forge/viral.json，这里只读缓存。
+    let gate1 = null;
+    try { gate1 = scoreBrief(readJson(path.join(dir, 'game.brief.json')) || {}); } catch (e) { gate1 = null; }
+    const probe = readJson(path.join(dir, '.forge', 'viral.json'));
+
     return {
       project: path.relative(root, dir) || '.',
       state: {
@@ -223,6 +232,15 @@ function scanAll(root) {
         built: state.built || null,
         taptapZip,
         audit,
+        viral: gate1 ? {
+          score: gate1.score,
+          total: gate1.total,
+          verdict: gate1.verdict,
+          note: gate1.note,
+          failed: gate1.failed.map((i) => ({ id: i.id, label: i.label, detail: i.detail, needsHuman: Boolean(i.needsHuman) })),
+          summary: verdictSummary(gate1, probe && probe.items)
+        } : null,
+        probe: probe ? { at: probe.at || null, ok: probe.ok, summary: probe.summary, failed: probe.failed } : null,
         updatedAt: state.updatedAt || null
       }
     };
@@ -308,7 +326,7 @@ function startRun(root, payload) {
   const target = String(payload.target || 'wechat');
   const action = String(payload.action || 'build');
   if (!['wechat', 'web'].includes(target)) throw new Error(`未知目标 "${target}"`);
-  if (!['build', 'package-taptap', 'upload-taptap'].includes(action)) throw new Error(`未知动作 "${action}"`);
+  if (!['build', 'package-taptap', 'upload-taptap', 'probe'].includes(action)) throw new Error(`未知动作 "${action}"`);
   const dir = path.resolve(root, project);
   if (!dir.startsWith(path.resolve(root))) throw new Error('项目路径越界');
   if (!fs.existsSync(path.join(dir, 'game.brief.json'))) throw new Error(`${project} 不是游戏目录`);
@@ -347,6 +365,9 @@ function startRun(root, payload) {
   let args;
   if (action === 'package-taptap') {
     args = [path.join(ENGINE_DIR, 'scripts', 'targets', 'taptap', 'taptap.mjs'), 'build', '--game', dir];
+  } else if (action === 'probe') {
+    // Gate 2：对产物实测基因，结果写进 .forge/viral.json 供扫描读缓存
+    args = [path.join(ENGINE_DIR, 'scripts', 'viral-probe.mjs'), '--game', dir, '--json'];
   } else if (action === 'upload-taptap') {
     args = [path.join(ENGINE_DIR, 'scripts', 'targets', 'taptap', 'taptap.mjs'), 'upload',
       '--game', dir, '--dev-id', String(devId), '--app-id', String(appId), '--yes'];
@@ -360,6 +381,7 @@ function startRun(root, payload) {
   });
 
   let dirty = false;
+  let stdoutBuf = '';
   const flush = () => {
     if (!dirty) return;
     dirty = false;
@@ -368,6 +390,7 @@ function startRun(root, payload) {
   let timer = setInterval(flush, 400);
 
   const onData = (buf) => {
+    stdoutBuf += String(buf);
     for (const raw of String(buf).split('\n')) {
       const line = raw.trim();
       if (!line) continue;
@@ -384,6 +407,20 @@ function startRun(root, payload) {
 
   const finish = (code, extraError) => {
     clearInterval(timer);
+    // probe 的退出码 2 是"有未达标项"，不是失败——结果照存，让看板显示。
+    if (action === 'probe') {
+      try {
+        const start = stdoutBuf.indexOf('{');
+        const parsed = JSON.parse(stdoutBuf.slice(start));
+        writeJson(path.join(dir, '.forge', 'viral.json'), {
+          ...parsed,
+          at: new Date().toISOString()
+        });
+        job.probeOk = parsed.ok;
+        job.probeSummary = parsed.summary;
+        if (code === 2) code = 0;
+      } catch (e) { /* JSON 没解析出来就照原样判失败 */ }
+    }
     job.code = code;
     job.status = code === 0 ? 'passed' : (code === null ? 'error' : 'failed');
     job.endedAt = new Date().toISOString();
@@ -425,15 +462,38 @@ export function apply(ctx, config = {}) {
    */
   let cachedRoot = null;
 
+  /* 快照格式版本。读端只采信 schema >= 本值的数据。
+   * 桌面应用和 web 实例会共用全局快照目录，旧进程写的是旧格式，
+   * 靠这个字段判断该不该采信。 */
+  const SCHEMA = 2;
+
+  /* 多实例共存：桌面应用和 `dsh --profile web` 会同时跑，共用同一个工作区。
+   * 早期两份进程都往 <root>/.game-console/state.json 和 ~/.dsh/game-console/state.json
+   * 写快照，后写的覆盖先写的——实测表现为面板数据在两份进程之间来回跳变，
+   * 而且旧版本的进程会把新版本才有的字段（audit / viral）直接抹掉。
+   *
+   * 做法：每个进程用稳定的实例 ID 写自己的文件，另写一份带时间戳的指针。
+   * 面板按实例读自己的，互不覆盖。旧格式的 state.json 继续写，兼容老客户端。
+   */
+  function instanceId() {
+    // 同一进程内稳定即可：用 profile 名区分 desktop / web，缺省 desktop。
+    const profile = process.env.DSH_PROFILE || 'desktop';
+    const port = process.env.PORT || '';
+    return port ? `${profile}-${port}` : profile;
+  }
+
   /** 把当前扫描结果落到工作区，供面板读取。 */
   function publishSnapshot(root) {
     try {
       const { games, tasks } = scanAll(root);
       const job = jobState(root);
+      const id = instanceId();
       // 同时写一份到全局位置：面板从侧栏打开时没有会话，
       // 读不到会话相对路径下的文件；全局快照与会话无关。
       const payload = {
         root,
+        instance: id,
+        schema: SCHEMA,
         at: new Date().toISOString(),
         snapshotPath: path.join(os.homedir(), '.dsh', 'game-console', 'state.json'),
         games,
@@ -441,11 +501,29 @@ export function apply(ctx, config = {}) {
         job: publicJob(job.running || job.last),
         jobRunning: Boolean(job.running)
       };
+      // 每实例一份，避免两个进程互相覆盖。
       try {
-        writeJson(path.join(root, '.game-console', 'state.json'), payload);
+        writeJson(path.join(root, '.game-console', `state.${id}.json`), payload);
+        writeJson(path.join(root, '.game-console', 'instances.json'), {
+          ...readJson(path.join(root, '.game-console', 'instances.json')),
+          [id]: { at: payload.at, file: `state.${id}.json`, schema: SCHEMA }
+        });
       } catch (e) { /* 工作区不可写时只写全局 */ }
       const globalDir = path.join(os.homedir(), '.dsh', 'game-console');
-      try { writeJson(path.join(globalDir, 'state.json'), payload); } catch (e) { /* 忽略 */ }
+      try {
+        writeJson(path.join(globalDir, `state.${id}.json`), payload);
+        writeJson(path.join(globalDir, 'instances.json'), {
+          ...readJson(path.join(globalDir, 'instances.json')),
+          [id]: { at: payload.at, file: `state.${id}.json`, schema: SCHEMA }
+        });
+      } catch (e) { /* 忽略 */ }
+      // 兼容路径：只有 schema 最高的实例写这份，避免旧实例把它抹成旧格式。
+      try {
+        const prev = readJson(path.join(globalDir, 'state.json'));
+        if (!prev || (prev.schema || 0) <= SCHEMA) {
+          writeJson(path.join(globalDir, 'state.json'), payload);
+        }
+      } catch (e) { /* 忽略 */ }
       cachedRoot = root;
       return true;
     } catch (e) {
