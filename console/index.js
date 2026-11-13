@@ -366,8 +366,9 @@ function startRun(root, payload) {
   if (action === 'package-taptap') {
     args = [path.join(ENGINE_DIR, 'scripts', 'targets', 'taptap', 'taptap.mjs'), 'build', '--game', dir];
   } else if (action === 'probe') {
-    // Gate 2：对产物实测基因，结果写进 .forge/viral.json 供扫描读缓存
-    args = [path.join(ENGINE_DIR, 'scripts', 'viral-probe.mjs'), '--game', dir, '--json'];
+    // Gate 2：走 precheck --game 而不是直接调 viral-probe，
+    // 这样 VD-09 的去重结果能和合规层合并，面板拿到的是一份完整的两层结论。
+    args = [path.join(ENGINE_DIR, 'scripts', 'precheck.mjs'), '--game', dir, '--json'];
   } else if (action === 'upload-taptap') {
     args = [path.join(ENGINE_DIR, 'scripts', 'targets', 'taptap', 'taptap.mjs'), 'upload',
       '--game', dir, '--dev-id', String(devId), '--app-id', String(appId), '--yes'];
@@ -412,12 +413,14 @@ function startRun(root, payload) {
       try {
         const start = stdoutBuf.indexOf('{');
         const parsed = JSON.parse(stdoutBuf.slice(start));
+        // precheck --game --json 的结构是 { compliance, viralDna, probe }
+        const g2 = parsed.probe || null;
         writeJson(path.join(dir, '.forge', 'viral.json'), {
-          ...parsed,
+          ...(g2 || { items: [], ok: true, failed: 0 }),
           at: new Date().toISOString()
         });
-        job.probeOk = parsed.ok;
-        job.probeSummary = parsed.summary;
+        job.probeOk = g2 ? g2.ok : true;
+        job.probeSummary = g2 ? g2.summary : '';
         if (code === 2) code = 0;
       } catch (e) { /* JSON 没解析出来就照原样判失败 */ }
     }

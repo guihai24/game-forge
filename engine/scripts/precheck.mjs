@@ -151,6 +151,26 @@ async function main() {
       }
     }
 
+    // VD-09 复用合规层的去重结果，不重复实现一套哈希比对。
+    if (gate2) {
+      const dup = report.items.filter((i) => i.id === 'identical-code' || i.id === 'same-assets' || i.id === 'template-app');
+      gate2.items = [{
+        id: 'VD-09',
+        level: 'BLOCK',
+        ok: dup.length === 0,
+        label: '素材与代码去重',
+        detail: dup.length ? `合规层报 ${dup.length} 项：${dup.map((i) => i.msg).join('；')}` : '与工作区其他游戏无重复',
+        hint: '换皮是渠道封号的第一原因，见 channel-rules.md 第二节',
+        reused: true
+      }, ...gate2.items];
+      const g2fail = gate2.items.filter((i) => !i.ok && i.level !== 'INFO');
+      gate2.failed = g2fail.length;
+      gate2.ok = g2fail.length === 0;
+      gate2.summary = g2fail.length === 0
+        ? '产物实测通过：去重、分享、反馈、时长、冷启动都达标'
+        : `产物实测 ${g2fail.length} 项未达：${g2fail.map((i) => i.label).join('、')}`;
+    }
+
     if (args.json) {
       console.log(JSON.stringify({
         stage: 'submit',
