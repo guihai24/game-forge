@@ -20,6 +20,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 
+import { precheckAll } from '../engine/scripts/precheck-lib.mjs';
+
 export const name = '@guihai24/dsh-game-console';
 export const inject = ['workingDirectory', 'sessions'];
 
@@ -161,9 +163,25 @@ function collectTasks(games) {
         });
       }
     }
+    // 自审阻断排最前：这类问题不改，后面每一步都是白做。
+    for (const i of (g.state.audit && g.state.audit.items) || []) {
+      if (i.level !== 'BLOCK') continue;
+      out.unshift({
+        id: `${g.project}:audit:${i.id}`,
+        kind: 'audit-block',
+        title: `${g.state.title} · 自审未过：${i.msg}`,
+        detail: i.hint || '规则见 engine/references/rules/channel-rules.md',
+        project: g.project,
+        title_game: g.state.title,
+        createdAt: new Date().toISOString()
+      });
+    }
   }
-  // 有截止时间的排前面，其余按创建时间倒序
+  // 自审阻断 > 有截止时间 > 其余按创建时间倒序
   return out.sort((a, b) => {
+    const pa = a.kind === 'audit-block' ? 0 : 1;
+    const pb = b.kind === 'audit-block' ? 0 : 1;
+    if (pa !== pb) return pa - pb;
     if (a.deadline && b.deadline) return String(a.deadline).localeCompare(String(b.deadline));
     if (a.deadline) return -1;
     if (b.deadline) return 1;
@@ -172,7 +190,12 @@ function collectTasks(games) {
 }
 
 function scanAll(root) {
-  const games = findGames(root).map((dir) => {
+  const dirs = findGames(root);
+  // 自审要跨游戏比对同质化，所以整批一起算，不是逐款算。
+  let audits = {};
+  try { audits = precheckAll(dirs, 'taptap'); } catch (e) { audits = {}; }
+
+  const games = dirs.map((dir) => {
     const state = loadState(dir);
     // TapTap 产物：targets/taptap/<slug>.zip。有就说明打好了包。
     const taptapDir = path.join(dir, 'targets', 'taptap');
@@ -184,6 +207,7 @@ function scanAll(root) {
         taptapZip = { file: zips[0], bytes: fs.statSync(f).size, at: fs.statSync(f).mtime.toISOString() };
       }
     } catch (e) { /* 没打过 */ }
+    const audit = audits[dir] || null;
     return {
       project: path.relative(root, dir) || '.',
       state: {
@@ -198,6 +222,7 @@ function scanAll(root) {
         revenue: state.revenue || {},
         built: state.built || null,
         taptapZip,
+        audit,
         updatedAt: state.updatedAt || null
       }
     };
@@ -296,6 +321,15 @@ function startRun(root, payload) {
   const appId = (brief.channel && brief.channel.taptapAppId) || (tt.ids && tt.ids.appId) || '';
   if (action === 'upload-taptap' && (!devId || !appId)) {
     throw new Error('TapTap 上传需要 dev-id 和 app-id：写进 game.brief.json 的 channel.taptapDevId / taptapAppId，或 .forge/state.json 的 channels.taptap.ids');
+  }
+
+  // 自审拦截：打包/上传前先看这款能不能过审。有 BLOCK 就别浪费一次提交。
+  if (action === 'package-taptap' || action === 'upload-taptap') {
+    const audit = precheckAll(findGames(root), 'taptap')[dir];
+    const blocks = (audit && audit.items || []).filter((i) => i.level === 'BLOCK');
+    if (blocks.length) {
+      throw new Error(`自审未通过，不能打包：${blocks.map((b) => b.msg).join('；')}。规则见 engine/references/rules/channel-rules.md`);
+    }
   }
 
   const id = `job_${Date.now().toString(36)}`;

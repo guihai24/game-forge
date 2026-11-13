@@ -228,13 +228,14 @@ window.__ModuleLoader__.load({
             h('table', null,
               h('thead', null, h('tr', null,
                 h('th', { style: { width: '26%' } }, '游戏'),
-                CHANNELS.map((c) => h('th', { key: c.id, style: { width: '15%' } }, c.label)),
+                CHANNELS.map((c) => h('th', { key: c.id, style: { width: '14%' } }, c.label)),
+                h('th', { style: { width: '90px' } }, '自审'),
                 h('th', null, '备注'),
                 h('th', { style: { width: '120px', textAlign: 'right' } }, '')
               )),
               h('tbody', null,
                 state.games.length === 0
-                  ? h('tr', null, h('td', { colspan: 6 }, h('div', { className: 'gc-empty' }, '工作区里还没有游戏。用 Game Studio 做一个，或把已有工程放进工作区。')))
+                  ? h('tr', null, h('td', { colspan: 7 }, h('div', { className: 'gc-empty' }, '工作区里还没有游戏。用 Game Studio 做一个，或把已有工程放进工作区。')))
                   : state.games.map((g) => {
                     const channels = g.state.channels || {};
                     const busy = state.jobRunning && state.job && state.job.project === g.project;
@@ -258,6 +259,27 @@ window.__ModuleLoader__.load({
                           h('span', { className: `gc-st ${cls}` }, s ? `${s.mark} ${s.text}` : '—')
                         );
                       }),
+                      h('td', null,
+                        (() => {
+                          const a = g.state.audit;
+                          if (!a) return h('span', { className: 'gc-st gc-none' }, '—');
+                          const blocks = a.items.filter((i) => i.level === 'BLOCK');
+                          const warns = a.items.filter((i) => i.level === 'WARN');
+                          if (blocks.length) {
+                            return h('span', {
+                              className: 'gc-st gc-err',
+                              title: blocks.map((b) => `${b.msg}\n→ ${b.hint}`).join('\n\n')
+                            }, `✗ ${blocks.length} 阻断`);
+                          }
+                          if (warns.length) {
+                            return h('span', {
+                              className: 'gc-st gc-warn',
+                              title: warns.map((w) => `${w.msg}\n→ ${w.hint}`).join('\n\n')
+                            }, `⚠ ${warns.length}`);
+                          }
+                          return h('span', { className: 'gc-st gc-ok' }, '✓');
+                        })()
+                      ),
                       h('td', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 } },
                         g.state.inferred ? '尚未建台账' : (g.state.offline ? '单机' : '联网')
                       ),
@@ -281,8 +303,10 @@ window.__ModuleLoader__.load({
                             h('button', {
                               className: 'gc-btn sm',
                               style: { marginLeft: 6 },
-                              disabled: anyBusy,
-                              title: '打成 TapTap 合规 zip（一级目录 + index.html，排除 game.json）',
+                              disabled: anyBusy || (g.state.audit ? !g.state.audit.ok : false),
+                              title: g.state.audit && !g.state.audit.ok
+                                ? `自审有 ${g.state.audit.blocked} 项阻断，先改：${g.state.audit.items.filter((i) => i.level === 'BLOCK').map((i) => i.msg).join('；')}`
+                                : '打成 TapTap 合规 zip（一级目录 + index.html，排除 game.json）',
                               onClick: () => startBuild(g.project, 'web', 'package-taptap')
                             }, 'TT包')
                           )
@@ -352,22 +376,26 @@ window.__ModuleLoader__.load({
       // 用命令通道做持续轮询会导致：
       //   session "..." is already owned by an active write handle
       // 桌面应用持有写句柄时整块面板会空掉。
-      // 全局快照：用 dsh-resource://file/absolute/<path> 打开，不依赖会话。
-      // 资源打开后要自己取内容；不同版本的 open 返回值形态不同，逐个字段试。
+      // 全局快照：优先走宿主的 /api/file 路由（同一套鉴权，简单可靠），
+      // 再退回 resources.open。两条都失败就当没数据，不抛错。
       const readGlobal = async () => {
         const snapshot = globalSnapshotPath();
         if (!snapshot) return null;
+
+        try {
+          const res = await fetch(`/api/file?path=${encodeURIComponent(snapshot)}`, { cache: 'no-store' });
+          if (res && res.ok) return await res.text();
+        } catch (error) { /* 落到下一条 */ }
+
         try {
           const handle = await ctx.resources.open(
             `dsh-resource://file/absolute${snapshot}`,
             {}
           );
           if (!handle) return null;
-          // 形态 A：直接返回内容
           if (typeof handle === 'string') return handle;
           if (handle.data) return new TextDecoder().decode(handle.data);
           if (typeof handle.text === 'string') return handle.text;
-          // 形态 B：可迭代的 resource，逐条取 value
           if (typeof handle[Symbol.asyncIterator] === 'function') {
             for await (const notice of handle) {
               if (!notice || !notice.ok) return null;
@@ -386,9 +414,23 @@ window.__ModuleLoader__.load({
 
       function globalSnapshotPath() {
         // 服务端把快照写到 ~/.dsh/game-console/state.json，与会话无关。
-        const home = props.homeDir || '';
+        const home = osHomeDir();
         if (!home) return '';
         return `${home}/.dsh/game-console/state.json`;
+      }
+
+      /** 客户端的 home 目录：宿主不保证提供，从会话的 cwd 推。 */
+      function osHomeDir() {
+        try {
+          const rows = ctx.sessions && ctx.sessions.list && ctx.sessions.list.getSnapshot
+            ? ctx.sessions.list.getSnapshot().byId : null;
+          for (const row of rows ? Object.values(rows) : []) {
+            const cwd = String((row && (row.cwd || row.workingDirectory)) || '');
+            const m = /^(\/(?:Users|home)\/[^/]+)/.exec(cwd);
+            if (m) return m[1];
+          }
+          return '';
+        } catch (e) { return ''; }
       }
 
       const readFile = async (sessionId, relPath) => {
@@ -441,7 +483,6 @@ window.__ModuleLoader__.load({
             consoleSessionId: typeof sessionId === 'string' ? sessionId : '',
             readFile: (rel) => readFile(sessionId, rel),
             readGlobal,
-            homeDir: props.homeDirFromHost || '',
             runBuild
           })
         }, ConsolePanel);

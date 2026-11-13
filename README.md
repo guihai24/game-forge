@@ -11,10 +11,16 @@
 游戏由 `@zseven-w/dsh-game-studio` 生成，本仓库不重复造生成器。
 
 ```bash
-game-forge build  --game <目录> --target wechat --preview   # 转换+试玩+断言+截图+二维码
-game-forge upload --game <目录> --version 1.0.0             # miniprogram-ci 上传开发版
-game-forge doctor                                           # 环境自检
+game-forge build    --game <目录> --target wechat --preview   # 转换+试玩+断言+截图+二维码
+game-forge upload   --game <目录> --version 1.0.0             # miniprogram-ci 上传开发版
+game-forge precheck --brief <brief.json>                      # 需求阶段自审：这个想法能不能上架
+game-forge precheck --game <目录> --channel taptap            # 提交前自审：含跨游戏同质化比对
+game-forge doctor                                             # 环境自检
 ```
+
+**自审先行。** 每一款游戏在写代码之前和提交之前都要过一遍渠道审核规则——需求阶段就能发现"这个题材基本不可能上架"，
+不用等做完了被拒。规则库见 `engine/references/rules/channel-rules.md`，每条都标了依据条款和能否机器判定。
+有 BLOCK 时退出码 2，面板上会禁用打包按钮并说明原因。
 
 
 **一句话的游戏想法 → 能交付的成品。** 不是"生成游戏"的包装，而是一条带断言的交付流水线：

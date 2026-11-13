@@ -7,6 +7,7 @@
  *   game-forge build   --game <目录> --target wechat|web [--preview] [--all <根目录>]
  *   game-forge verify  --game <目录>
  *   game-forge upload  --game <目录> [--version 1.0.0] [--channel wechat]
+ *   game-forge precheck --brief <brief.json> | --game <目录> [--channel taptap|wechat]
  *   game-forge doctor
  *   game-forge brief   <init|check> ...
  *
@@ -27,6 +28,8 @@ const USAGE = `game-forge —— 游戏交付流水线
   game-forge build   --all [根目录] [--targets wechat,web] [--preview]
   game-forge verify  --game <目录> --target wechat|web
   game-forge upload  --game <目录> --version <版本号> [--desc 说明] [--appid <AppID>]
+  game-forge precheck --brief <brief.json> [--channel taptap|wechat]
+  game-forge precheck --game <目录> [--channel taptap|wechat] [--json]
   game-forge doctor
   game-forge brief   init|check ...
 
@@ -34,6 +37,8 @@ const USAGE = `game-forge —— 游戏交付流水线
   build   转换 + 试玩 + 断言 + 截图；--preview 额外生成预览二维码
   verify  只跑验证，不产物发布（build 的子集）
   upload  用 miniprogram-ci 上传开发版；需要代码上传密钥，不需要开发者工具
+  precheck 按渠道审核规范自查。--brief 查需求阶段（还没写代码时用，避免沉没成本），
+          --game 查提交前全量（含跨游戏同质化）。有 BLOCK 退出码 2。
   doctor  自检环境
 
 产物:
@@ -83,6 +88,8 @@ function main(argv) {
       }
       return run('targets/wechat/upload-ci.mjs', ['--project', project, ...args]);
     }
+    case 'precheck':
+      return run('precheck.mjs', rest);
     case 'doctor':
       return run('doctor.mjs', rest);
     case 'brief':
