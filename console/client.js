@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'game-console';
     const NS = '@guihai24/dsh-game-console';
 
-    const inject = ['slots', 'locale', 'remote', 'remote.commands', 'sessions'];
+    const inject = ['slots', 'locale', 'remote', 'remote.commands', 'sessions', 'resources'];
 
     /* ---------- 图标 ---------- */
     function PanelIcon(props) {
@@ -109,74 +109,73 @@ window.__ModuleLoader__.load({
 
     /* ---------- 主组件 ---------- */
     function ConsolePanel(props) {
-      const sessionId = props.consoleSessionId || props.sessionId || '';
-      const runCommand = props.runCommand;
       const [state, setState] = useState({ loading: true, games: [], tasks: [], error: null });
 
-      // 主区面板从侧栏打开时没有 sessionId，需要自己找当前会话。
-      // 官方做法：ctx.sessions.list 里 retainedBy.mainView > 0 的那条。
-      const resolveSession = useCallback(() => {
-        if (sessionId) return sessionId;
-        try {
-          const list = props.sessions && props.sessions.list;
-          const rows = list && list.getSnapshot ? list.getSnapshot().byId : null;
-          if (rows) {
-            const current = Object.values(rows).find((row) => (row.retainedBy && row.retainedBy.mainView) > 0);
-            if (current && current.id) return current.id;
-            const any = Object.values(rows)[0];
-            if (any && any.id) return any.id;
-          }
-        } catch (e) { /* 落到下面的报错 */ }
-        return '';
-      }, [sessionId, props.sessions]);
-
-      const call = useCallback(async (input) => {
-        if (!runCommand) throw new Error('命令通道不可用');
-        const sid = resolveSession();
-        if (!sid) throw new Error('没有可用会话：先在左侧点开一个会话，再回到工作室');
-        const res = await runCommand(sid, input);
-        if (!res || !res.ok) throw new Error((res && res.text) || '命令失败');
-        return JSON.parse(res.text);
-      }, [runCommand, resolveSession]);
+      // 读快照文件，不走命令通道。
+      //
+      // 为什么：commands.execute 会往会话写记录，桌面应用持有写句柄时报
+      //   session "..." is already owned by an active write handle
+      // 面板整块空掉。
+      //
+      // 两条读路径，按顺序试：
+      //   1. 全局快照 ~/.dsh/game-console/state.json（与会话无关，侧栏打开时也能用）
+      //   2. 工作区相对路径 .game-console/state.json（跟着当前会话的工作区）
+      // 服务端两个位置都写。
+      const readSnapshot = useCallback(async () => {
+        const readGlobal = props.readGlobal;
+        const read = props.readFile;
+        let text = null;
+        if (readGlobal) text = await readGlobal();
+        if (!text && read) text = await read('.game-console/state.json');
+        if (!text) return null;
+        try { return JSON.parse(text); } catch (e) { return null; }
+      }, [props.readFile, props.readGlobal]);
 
       const load = useCallback(async () => {
-        setState((s) => ({ ...s, loading: true, error: null }));
         try {
-          const data = await call('scan');
-          setState({ loading: false, games: data.games || [], tasks: data.tasks || [], error: null, job: data.job || null, jobRunning: Boolean(data.jobRunning) });
+          const data = await readSnapshot();
+          if (!data) {
+            setState((s) => ({ ...s, loading: false, error: null }));
+            return;
+          }
+          setState({
+            loading: false,
+            games: data.games || [],
+            tasks: data.tasks || [],
+            error: null,
+            job: data.job || null,
+            jobRunning: Boolean(data.jobRunning)
+          });
         } catch (error) {
-          setState({ loading: false, games: [], tasks: [], error: String(error.message || error) });
+          setState((s) => ({ ...s, loading: false, error: String((error && error.message) || error) }));
         }
-      }, [call]);
+      }, [readSnapshot]);
 
       useEffect(() => { load(); }, [load]);
 
-      // 有任务在跑时轮询 job：读服务端写出的文件状态，不靠命令轮询（会污染会话）。
-      // 这里仍是命令（server 读文件后返回），但频率低、只在跑任务时发生。
+      // 轮询快照：有任务时快一点，空闲时慢一点。全是只读文件读取。
       useEffect(() => {
-        if (!state.jobRunning) return undefined;
-        const timer = setInterval(async () => {
-          try {
-            const data = await call('job');
-            if (!data.running) {
-              // 任务结束：拉一次全量，状态和构建产物都会变
-              await load();
-            } else {
-              setState((s) => ({ ...s, job: data.job }));
-            }
-          } catch (e) { /* 下一轮再试 */ }
-        }, 1500);
+        const ms = state.jobRunning ? 1200 : 4000;
+        const timer = setInterval(load, ms);
         return () => clearInterval(timer);
-      }, [state.jobRunning, call, load]);
+      }, [state.jobRunning, load]);
 
-      const startBuild = useCallback(async (project, target) => {
+      // 有任务在跑时读快照会更频繁（在下面那个 interval 里已按 jobRunning 调速），
+      // 这里不需要额外的轮询循环。
+
+      const startBuild = useCallback(async (project, target, action) => {
         try {
-          const data = await call(`run ${JSON.stringify({ project, target })}`);
-          setState((s) => ({ ...s, job: data.job, jobRunning: true }));
+          // 构建是用户主动动作，必须走命令（服务端要 spawn 子进程）。
+          // 单次触发、不轮询；进度靠读快照文件。
+          if (!props.runBuild) throw new Error('命令通道不可用：请先在左侧打开一个会话');
+          const res = await props.runBuild(project, target, action || 'build');
+          if (!res || !res.ok) throw new Error((res && res.text) || '启动失败');
+          setState((s) => ({ ...s, error: null, jobRunning: true }));
+          await load();
         } catch (error) {
           setState((s) => ({ ...s, error: String((error && error.message) || error) }));
         }
-      }, [call]);
+      }, [props.runBuild, load]);
 
       const stats = useMemo(() => {
         const games = Array.isArray(state.games) ? state.games : [];
@@ -246,6 +245,13 @@ window.__ModuleLoader__.load({
                         h('div', { className: 'gc-gid' }, g.project)
                       ),
                       CHANNELS.map((c) => {
+                        // TapTap 没建台账时，用打包产物说明状态：有 zip 就是「已打包」
+                        if (c.id === 'taptap' && !stageSummary(channels.taptap) && g.state.taptapZip) {
+                          return h('td', { key: c.id },
+                            h('span', { className: 'gc-st gc-run', title: `${g.state.taptapZip.file} · ${Math.round(g.state.taptapZip.bytes / 1024)} KB` },
+                              `○ 已打包`)
+                          );
+                        }
                         const s = stageSummary(channels[c.id]);
                         const cls = s ? { ok: 'gc-ok', warn: 'gc-warn', err: 'gc-err', run: 'gc-run', none: 'gc-none' }[s.tone] : 'gc-none';
                         return h('td', { key: c.id },
@@ -271,7 +277,14 @@ window.__ModuleLoader__.load({
                               disabled: anyBusy,
                               title: anyBusy ? '已有任务在跑' : '打成单文件 HTML 并验证',
                               onClick: () => startBuild(g.project, 'web')
-                            }, '网页')
+                            }, '网页'),
+                            h('button', {
+                              className: 'gc-btn sm',
+                              style: { marginLeft: 6 },
+                              disabled: anyBusy,
+                              title: '打成 TapTap 合规 zip（一级目录 + index.html，排除 game.json）',
+                              onClick: () => startBuild(g.project, 'web', 'package-taptap')
+                            }, 'TT包')
                           )
                       )
                     );
@@ -332,13 +345,72 @@ window.__ModuleLoader__.load({
 
     /* ---------- 注册 ---------- */
     function apply(ctx) {
-      // 和旧插件同一套命令通道：execute(sessionId, "/命令 参数", [])
-      // 返回值 { ok, value: { result: { kind, text } } }
-      const runCommand = async (sessionId, input) => {
+      // 两条通道，用途不同：
+      //   读：remote.workspaceFiles.readBytes(sessionId, 相对路径) —— 纯只读，不写会话
+      //   写：remote.commands.execute —— 仅用户主动触发（构建），单次、不轮询
+      //
+      // 用命令通道做持续轮询会导致：
+      //   session "..." is already owned by an active write handle
+      // 桌面应用持有写句柄时整块面板会空掉。
+      // 全局快照：用 dsh-resource://file/absolute/<path> 打开，不依赖会话。
+      // 资源打开后要自己取内容；不同版本的 open 返回值形态不同，逐个字段试。
+      const readGlobal = async () => {
+        const snapshot = globalSnapshotPath();
+        if (!snapshot) return null;
         try {
-          const result = await ctx.remote.commands.execute(sessionId, `/game-console ${input}`, []);
+          const handle = await ctx.resources.open(
+            `dsh-resource://file/absolute${snapshot}`,
+            {}
+          );
+          if (!handle) return null;
+          // 形态 A：直接返回内容
+          if (typeof handle === 'string') return handle;
+          if (handle.data) return new TextDecoder().decode(handle.data);
+          if (typeof handle.text === 'string') return handle.text;
+          // 形态 B：可迭代的 resource，逐条取 value
+          if (typeof handle[Symbol.asyncIterator] === 'function') {
+            for await (const notice of handle) {
+              if (!notice || !notice.ok) return null;
+              const v = notice.value;
+              if (v === undefined) continue;
+              if (typeof v === 'string') return v;
+              if (v && v.data) return new TextDecoder().decode(v.data);
+              if (v && typeof v.text === 'string') return v.text;
+            }
+          }
+          return null;
+        } catch (error) {
+          return null;
+        }
+      };
+
+      function globalSnapshotPath() {
+        // 服务端把快照写到 ~/.dsh/game-console/state.json，与会话无关。
+        const home = props.homeDir || '';
+        if (!home) return '';
+        return `${home}/.dsh/game-console/state.json`;
+      }
+
+      const readFile = async (sessionId, relPath) => {
+        try {
+          const sid = sessionId || currentSessionId(ctx);
+          if (!sid) return null;
+          const result = await ctx.remote.workspaceFiles.readBytes(sid, relPath, {});
+          if (!result || !result.ok) return null;
+          return new TextDecoder().decode(result.value.data);
+        } catch (error) {
+          return null;
+        }
+      };
+
+      const runBuild = async (project, target, action) => {
+        try {
+          const sid = currentSessionId(ctx);
+          if (!sid) return { ok: false, text: '没有打开中的会话：先在左侧打开一个会话，构建需要它来接收输出' };
+          const line = `/game-console run ${JSON.stringify({ project, target, action: action || 'build' })}`;
+          const result = await ctx.remote.commands.execute(sid, line, []);
           if (!result || !result.ok) {
-            return { ok: false, text: (result && result.error && result.error.message) || '命令失败' };
+            return { ok: false, text: (result && result.error && result.error.message) || '构建启动失败' };
           }
           const value = result.value && result.value.result !== undefined ? result.value.result : result.value;
           if (value === undefined) return { ok: false, text: '命令在当前会话不可用' };
@@ -348,6 +420,18 @@ window.__ModuleLoader__.load({
         }
       };
 
+      function currentSessionId(c) {
+        try {
+          const rows = c.sessions && c.sessions.list && c.sessions.list.getSnapshot
+            ? c.sessions.list.getSnapshot().byId : null;
+          if (!rows) return '';
+          const current = Object.values(rows).find((row) => (row.retainedBy && row.retainedBy.mainView) > 0);
+          if (current && current.id) return current.id;
+          const first = Object.values(rows)[0];
+          return first && first.id ? first.id : '';
+        } catch (e) { return ''; }
+      }
+
       ctx.effect(() => ctx.slots.inject('main', function* () {
         yield ctx.slots.register({
           name: 'main',
@@ -355,8 +439,10 @@ window.__ModuleLoader__.load({
           locale: NS,
           inject: (sessionId) => ({
             consoleSessionId: typeof sessionId === 'string' ? sessionId : '',
-            runCommand,
-            sessions: ctx.sessions
+            readFile: (rel) => readFile(sessionId, rel),
+            readGlobal,
+            homeDir: props.homeDirFromHost || '',
+            runBuild
           })
         }, ConsolePanel);
       }), 'game-console: main panel');

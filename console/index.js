@@ -21,7 +21,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 
 export const name = '@guihai24/dsh-game-console';
-export const inject = ['workingDirectory'];
+export const inject = ['workingDirectory', 'sessions'];
 
 /* ---------- 文件读取 ---------- */
 const SKIP = new Set([
@@ -174,6 +174,16 @@ function collectTasks(games) {
 function scanAll(root) {
   const games = findGames(root).map((dir) => {
     const state = loadState(dir);
+    // TapTap 产物：targets/taptap/<slug>.zip。有就说明打好了包。
+    const taptapDir = path.join(dir, 'targets', 'taptap');
+    let taptapZip = null;
+    try {
+      const zips = fs.readdirSync(taptapDir).filter((f) => f.endsWith('.zip'));
+      if (zips.length) {
+        const f = path.join(taptapDir, zips[0]);
+        taptapZip = { file: zips[0], bytes: fs.statSync(f).size, at: fs.statSync(f).mtime.toISOString() };
+      }
+    } catch (e) { /* 没打过 */ }
     return {
       project: path.relative(root, dir) || '.',
       state: {
@@ -187,6 +197,7 @@ function scanAll(root) {
         tasks: state.tasks || [],
         revenue: state.revenue || {},
         built: state.built || null,
+        taptapZip,
         updatedAt: state.updatedAt || null
       }
     };
@@ -270,15 +281,27 @@ function startRun(root, payload) {
 
   const project = String(payload.project || '');
   const target = String(payload.target || 'wechat');
+  const action = String(payload.action || 'build');
   if (!['wechat', 'web'].includes(target)) throw new Error(`未知目标 "${target}"`);
+  if (!['build', 'package-taptap', 'upload-taptap'].includes(action)) throw new Error(`未知动作 "${action}"`);
   const dir = path.resolve(root, project);
   if (!dir.startsWith(path.resolve(root))) throw new Error('项目路径越界');
   if (!fs.existsSync(path.join(dir, 'game.brief.json'))) throw new Error(`${project} 不是游戏目录`);
 
+  // taptap 上传需要开发者 ID：优先 brief 里的 channel.taptap，其次 state 的 ids
+  const brief = readJson(path.join(dir, 'game.brief.json')) || {};
+  const st = loadState(dir);
+  const tt = (st.channels && st.channels.taptap) || {};
+  const devId = (brief.channel && brief.channel.taptapDevId) || (tt.ids && tt.ids.devId) || '';
+  const appId = (brief.channel && brief.channel.taptapAppId) || (tt.ids && tt.ids.appId) || '';
+  if (action === 'upload-taptap' && (!devId || !appId)) {
+    throw new Error('TapTap 上传需要 dev-id 和 app-id：写进 game.brief.json 的 channel.taptapDevId / taptapAppId，或 .forge/state.json 的 channels.taptap.ids');
+  }
+
   const id = `job_${Date.now().toString(36)}`;
   const before = jobState(root);
   const job = {
-    id, project, target, status: 'running',
+    id, project, target, action, status: 'running',
     phase: 0, total: 0, line: '启动…',
     startedAt: new Date().toISOString(), endedAt: null, code: null,
     log: []
@@ -286,7 +309,16 @@ function startRun(root, payload) {
   running = job;
   writeJob(root, { running: job, last: before.last });
 
-  const args = [cli, 'build', '--target', target, '--game', dir];
+  const ENGINE_DIR = path.dirname(path.dirname(cli));
+  let args;
+  if (action === 'package-taptap') {
+    args = [path.join(ENGINE_DIR, 'scripts', 'targets', 'taptap', 'taptap.mjs'), 'build', '--game', dir];
+  } else if (action === 'upload-taptap') {
+    args = [path.join(ENGINE_DIR, 'scripts', 'targets', 'taptap', 'taptap.mjs'), 'upload',
+      '--game', dir, '--dev-id', String(devId), '--app-id', String(appId), '--yes'];
+  } else {
+    args = [cli, 'build', '--target', target, '--game', dir];
+  }
   const child = spawn(process.execPath, args, {
     cwd: dir,
     env: { ...process.env, NO_COLOR: '1' },
@@ -336,7 +368,7 @@ function startRun(root, payload) {
 function publicJob(job) {
   if (!job) return null;
   return {
-    id: job.id, project: job.project, target: job.target,
+    id: job.id, project: job.project, target: job.target, action: job.action || 'build',
     status: job.status, phase: job.phase, total: job.total,
     line: job.line, error: job.error || null,
     startedAt: job.startedAt, endedAt: job.endedAt, code: job.code,
@@ -346,6 +378,103 @@ function publicJob(job) {
 
 /* ---------- 注册 ---------- */
 export function apply(ctx, config = {}) {
+  /* 面板走工作区文件，不走命令通道。
+   *
+   * 原因（2026-11-13 实测）：ctx.remote.commands.execute 会往会话写记录；
+   * 桌面应用已经持有写句柄时会报
+   *   session "..." is already owned by an active write handle
+   * 界面就整个空掉。而面板只需读台账、写一份快照，用文件最稳：
+   *   - 服务端把扫描结果写到 <root>/.game-console/state.json
+   *   - 面板用 remote.workspaceFiles.readBytes 读它（只读、不激活 agent、不写会话）
+   *
+   * 命令仍然保留，供 agent 在对话里用（scan/run/set-stage 等）。
+   */
+  let cachedRoot = null;
+
+  /** 把当前扫描结果落到工作区，供面板读取。 */
+  function publishSnapshot(root) {
+    try {
+      const { games, tasks } = scanAll(root);
+      const job = jobState(root);
+      // 同时写一份到全局位置：面板从侧栏打开时没有会话，
+      // 读不到会话相对路径下的文件；全局快照与会话无关。
+      const payload = {
+        root,
+        at: new Date().toISOString(),
+        snapshotPath: path.join(os.homedir(), '.dsh', 'game-console', 'state.json'),
+        games,
+        tasks,
+        job: publicJob(job.running || job.last),
+        jobRunning: Boolean(job.running)
+      };
+      try {
+        writeJson(path.join(root, '.game-console', 'state.json'), payload);
+      } catch (e) { /* 工作区不可写时只写全局 */ }
+      const globalDir = path.join(os.homedir(), '.dsh', 'game-console');
+      try { writeJson(path.join(globalDir, 'state.json'), payload); } catch (e) { /* 忽略 */ }
+      cachedRoot = root;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** 尽力找到工作区根：会话 → 缓存 → 默认工作区。 */
+  async function resolveRoot(agent) {
+    if (agent) {
+      try {
+        const root = await ctx.workingDirectory.ensure(agent);
+        if (root) { cachedRoot = root; return root; }
+      } catch (e) { /* 试下一个 */ }
+    }
+    if (cachedRoot) return cachedRoot;
+    for (const session of liveSessions()) {
+      try {
+        const root = await ctx.workingDirectory.ensure(session);
+        if (root) { cachedRoot = root; return root; }
+      } catch (e) { /* 下一个 */ }
+    }
+    // 没有会话时退到默认工作区：面板从侧栏打开时可能一个会话都没开过。
+    const fallback = config && config.workspaceRoot
+      ? config.workspaceRoot
+      : path.join(os.homedir(), 'Documents', 'deepseek-harness', 'default-workspace');
+    if (fs.existsSync(fallback)) { cachedRoot = fallback; return fallback; }
+    return null;
+  }
+
+  /** 已注册的会话句柄（新→旧）。不同版本的 Session 服务形态不一样，逐层试。 */
+  function liveSessions() {
+    const out = [];
+    try {
+      const svc = ctx.sessions;
+      const list = svc && svc.list;
+      const snap = list && list.getSnapshot ? list.getSnapshot() : null;
+      const byId = snap && snap.byId ? snap.byId : null;
+      if (byId) {
+        for (const row of Object.values(byId)) {
+          if (row && row.handle) out.push(row.handle);
+          else if (row && row.id && svc.scope) {
+            try { const h = svc.scope(row.id); if (h) out.push(h); } catch (e) { /* 忽略 */ }
+          }
+        }
+      }
+    } catch (e) { /* 忽略 */ }
+    return out;
+  }
+
+  // 每 2 秒刷一次快照：面板只需读文件，不产生任何会话写入。
+  ctx.effect(() => {
+    let alive = true;
+    const tick = async () => {
+      if (!alive) return;
+      const root = await resolveRoot(null);
+      if (root) publishSnapshot(root);
+    };
+    tick();
+    const timer = setInterval(tick, 2000);
+    return () => { alive = false; clearInterval(timer); };
+  }, 'game-console: snapshot loop');
+
   ctx.inject(['commands'], (child) => {
     child.commands.register({
       name: 'game-console',
@@ -362,14 +491,17 @@ export function apply(ctx, config = {}) {
           if (action === 'scan') {
             const { games, tasks } = scanAll(root);
             const job = jobState(root);
+            publishSnapshot(root);
             return { kind: 'success', text: JSON.stringify({ root, games, tasks, job: publicJob(job.running || job.last), jobRunning: Boolean(job.running) }) };
           }
           if (action === 'job') {
             const job = jobState(root);
+            publishSnapshot(root);
             return { kind: 'success', text: JSON.stringify({ job: publicJob(job.running || job.last), running: Boolean(job.running) }) };
           }
           if (action === 'run') {
             const job = startRun(root, payload);
+            publishSnapshot(root);
             return { kind: 'success', text: JSON.stringify({ jobId: job.id, job: publicJob(job) }) };
           }
           if (action === 'cancel') {
@@ -387,7 +519,9 @@ export function apply(ctx, config = {}) {
             return { kind: 'success', text: JSON.stringify(loadState(dir)) };
           }
           if (action === 'set-stage') {
-            return { kind: 'success', text: JSON.stringify(setStage(root, payload)) };
+            const out = setStage(root, payload);
+            publishSnapshot(root);
+            return { kind: 'success', text: JSON.stringify(out) };
           }
           return { kind: 'error', text: `Unknown action "${action}"` };
         } catch (error) {
