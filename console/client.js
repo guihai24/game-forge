@@ -336,12 +336,19 @@ window.__ModuleLoader__.load({
                             `viral-dna ${v.score}/${v.total}${v.reconciled ? '（已并入产物实测）' : '（仅 brief 静态判定）'}`,
                             ...v.failed.map((i) => `${i.needsHuman ? '?' : (i.unmeasured ? '·' : '⚠')} ${i.id} ${i.label}：${i.detail}`),
                             ...(v.overridden || []).map((o) => `↑ ${o.id} ${o.label} 被 ${o.by} 实测修正`),
+                            // 方向没标：项本身通过了，所以不在 failed 里，必须单独说
+                            v.needsDirection ? '⚠ trend_evidence 未标 trend_direction，机器不猜方向，VD-08 判不出该不该砍' : null,
+                            // note 里是 verdict 的原因说明，之前从没显示过
+                            v.note ? `\n${v.note}` : null,
                             '',
                             v.summary
-                          ].join('\n');
+                          ].filter((x) => x !== null).join('\n');
                           return h('span', { className: `gc-st ${tone}`, title: tip },
                             `${v.score}/${v.total}`,
-                            v.reconciled ? null : h('span', { style: { opacity: 0.55, fontSize: 10 } }, '静态')
+                            v.needsDirection
+                              ? h('span', { className: 'gc-warn', style: { fontSize: 10, marginLeft: 2 } }, '⚠方向')
+                              : null,
+                            v.reconciled ? null : h('span', { style: { opacity: 0.55, fontSize: 10, marginLeft: 2 } }, '静态')
                           );
                         })()
                       ),

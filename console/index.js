@@ -197,6 +197,20 @@ function collectTasks(games) {
       });
     }
 
+    // 写了 trend_evidence 却没标方向：这是"没判断过"，跟"判断了但结论是负向"
+    // 是两件事，不能混进 viral-drop 里。单独一条待办，动作很明确——补个字段。
+    if (v && v.needsDirection) {
+      out.push({
+        id: `${g.project}:viral:direction`,
+        kind: 'viral-direction',
+        title: `${g.state.title} · trend_evidence 没标方向`,
+        detail: 'brief 里写了趋势依据但没写 trend_direction（positive / negative）。机器不猜方向，所以 VD-08 判不出该不该砍。补上这个字段即可。规则见 viral-dna-rules.md',
+        project: g.project,
+        title_game: g.state.title,
+        createdAt: new Date().toISOString()
+      });
+    }
+
     // Gate 2 实测未达：同样每个游戏一条，列出未达项。
     const p = g.state.probe;
     if (p && p.ok === false && p.items) {
@@ -215,7 +229,9 @@ function collectTasks(games) {
     }
   }
   // 自审阻断 > 基因砍线 > 产物实测 > 有截止时间 > 其余
-  const rank = (k) => ({ 'audit-block': 0, 'viral-drop': 1, 'probe-fail': 2 }[k] ?? 3);
+  // 自审阻断 > 基因砍线 > 方向缺失 > 产物实测 > 有截止时间 > 其余
+  // 方向缺失排在实测前面：它决定"该不该做"，实测只在已经决定要做之后才有意义。
+  const rank = (k) => ({ 'audit-block': 0, 'viral-drop': 1, 'viral-direction': 2, 'probe-fail': 3 }[k] ?? 4);
   return out.sort((a, b) => {
     const pa = rank(a.kind);
     const pb = rank(b.kind);
@@ -341,6 +357,9 @@ function scanAll(root) {
           // 有实测修正时，分数和"从 brief 静态推测"不是一回事，界面要说清楚
           reconciled: Boolean(gate1.reconciled),
           negativeTrend: Boolean(gate1.negativeTrend),
+          // 写了 trend_evidence 但没标 trend_direction：机器不猜方向，
+          // 这条要显式暴露给界面，否则看板上"干干净净"，实际却没判断过方向。
+          needsDirection: Boolean(gate1.needsDirection),
           overridden: (gate1.overridden || []).map((i) => ({ id: i.id, label: i.label, by: i.overriddenBy, detail: i.detail })),
           failed: gate1.failed.map((i) => ({
             id: i.id,

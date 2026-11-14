@@ -140,8 +140,6 @@ export function scoreBrief(brief, known) {
   // 写"动画反馈好"会让 VD-03（即时反馈）判过——而游戏可能压根没有这些功能。
   // 市场证据描述的是"外面发生了什么"，不是"这个游戏有什么"，两者不能混。
   const text = `${b.title || ''} ${b.genre || ''} ${b.notes || ''} ${JSON.stringify(b.rules || {})}`;
-  // 情绪主题属于立项语境，不用于判定产品功能；单独留着给 VD-08 参考。
-  const contextText = `${b.emotion_theme || ''} ${b.trend_evidence || ''}`;
   const rules = b.rules || {};
   const items = [];
 
@@ -404,7 +402,11 @@ export function verdictSummary(gate1, gate2) {
   const g2unmeasured = g2.filter((i) => i.ok === null);
   const parts = [];
   parts.push(`基因 ${score}/${total}`);
-  if (gate1 && gate1.verdict === 'suggest-drop') parts.push('需求阶段已触发砍线');
+  // 砍线要说清原因：负向趋势 / 缺 2 条 / 缺方向标注，是三种不同的事，
+  // 笼统写"已触发砍线"等于没说。
+  if (gate1 && gate1.negativeTrend) parts.push('趋势依据为负向，建议别做');
+  else if (gate1 && gate1.verdict === 'suggest-drop') parts.push('需求阶段缺 2 条以上');
+  if (gate1 && gate1.needsDirection) parts.push('trend_evidence 未标方向');
   if (gate1 && gate1.overridden && gate1.overridden.length) {
     parts.push(`实测推翻 ${gate1.overridden.length} 项静态判定`);
   }
