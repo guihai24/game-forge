@@ -32,6 +32,10 @@ const TEMPLATE = {
   pace: '',
   emotion_theme: '',
   trend_evidence: '',
+  // 方向由写证据的人直接标，机器不猜语义。
+  // 关键词识别负向不可靠：「送死」「凉了」「挤不进去」都会漏，正向文本里偶现
+  // 「不宜」还会误杀。所以宁可多一个字段。
+  trend_direction: '',   // 'positive' | 'negative' | ''
   rules: {},
   acceptance: {
     mustReachPhase: ['playing'],
@@ -59,6 +63,7 @@ function parseArgs(argv) {
     else if (a === '--orientation') o.orientation = argv[++i];
     else if (a === '--emotion-theme') o.emotionTheme = argv[++i];
     else if (a === '--trend-evidence') o.trendEvidence = argv[++i];
+    else if (a === '--trend-direction') o.trendDirection = argv[++i];
     else if (a === '--pace') o.pace = argv[++i];
     else if (a === '--online') o.offline = false;
     else if (a === '--iap') o.iap = true;
@@ -73,6 +78,7 @@ function usage() {
   console.log(`用法:
   node brief.mjs init  --out <路径> [--title T] [--genre G] [--target wechat|web] [--appid ID] [--orientation landscape|portrait]
                        [--emotion-theme <情绪主题>] [--trend-evidence <势的依据>]
+                       [--trend-direction positive|negative]
                        [--pace twitch|midcore|strategy] [--online] [--iap] [--share leaderboard]
   node brief.mjs check --file <路径>`);
 }
@@ -95,6 +101,7 @@ function init(args) {
   if (args.appid) brief.channel.appid = args.appid;
   if (args.emotionTheme) brief.emotion_theme = args.emotionTheme;
   if (args.trendEvidence) brief.trend_evidence = args.trendEvidence;
+  if (args.trendDirection) brief.trend_direction = args.trendDirection;
   if (args.pace) brief.pace = args.pace;
   if (args.offline === false) brief.offline = false;
   if (args.iap) brief.iap = true;
@@ -139,6 +146,9 @@ function validate(brief) {
   if (!brief.share) warnings.push('share 未填——Gate 1 的 VD-05（分享即机制）会判不过');
   if (!brief.emotion_theme) warnings.push('emotion_theme 未填——情绪主题是立项输入，不是可选项');
   if (!String(brief.trend_evidence || '').trim()) warnings.push('trend_evidence 未填——说不出"凭什么现在是这个题材的窗口期"，Gate 1 的 VD-08 会判不过');
+  if (String(brief.trend_evidence || '').trim() && !['positive', 'negative'].includes(String(brief.trend_direction || '').toLowerCase())) {
+    warnings.push('trend_direction 未填（positive / negative）——机器不猜方向，VD-08 无法判断该不该砍');
+  }
 
   return { errors, warnings };
 }

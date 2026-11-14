@@ -56,6 +56,7 @@
 | 玩家失败时会觉得「差点就过了」还是「这游戏不公平」？ | `VD-04` 人工项，要用户确认 |
 | 玩完之后他会跟朋友说什么？ | `VD-06` 人工项，要用户确认 |
 | 现在为什么是这个题材？看到什么信号了？ | `emotion_theme` + `trend_evidence` |
+| 这个势是**正**的还是**负**的？（有窗口期 / 没有） | `trend_direction`，填 positive 或 negative |
 
 最后一条**不能跳过**。情绪主题会过期——谷子经济 2024 年已经 1688 亿、品牌都下场了，再进就是接盘。
 没有"势"的依据就不要立项，而不是做完再说。
@@ -107,6 +108,7 @@ node scripts/precheck.mjs --brief <游戏目录>/game.brief.json --channel wecha
 | `pace` | 节奏档 `twitch` / `midcore` / `strategy`，留空则从 genre 推断 |
 | `emotion_theme` | 情绪主题（解压/职场发泄/治愈…）。会过期，所以只作输入 |
 | `trend_evidence` | 凭什么现在是这个题材的窗口期。空则 VD-08 不过 |
+| `trend_direction` | `positive` / `negative`。**必须显式标**，机器不猜。标 negative 会直接触发砍线建议 |
 
 ## 反例：什么情况下别问
 

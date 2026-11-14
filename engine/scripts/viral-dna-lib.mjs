@@ -133,7 +133,15 @@ export function judgeRoundSeconds(seconds, brief) {
 export function scoreBrief(brief, known) {
   const b = brief || {};
   const k = known || {};
-  const text = `${b.title || ''} ${b.genre || ''} ${b.notes || ''} ${JSON.stringify(b.rules || {})} ${b.emotion_theme || ''} ${b.trend_evidence || ''}`;
+  // 产品描述文本：只包含"描述这个游戏本身"的字段。
+  //
+  // 曾经把 emotion_theme / trend_evidence 也拼进来，导致写市场分析时提到的词
+  // 能翻产品功能项：trend_evidence 里写"畅销榜排行前列"会让 VD-05（分享机制）判过，
+  // 写"动画反馈好"会让 VD-03（即时反馈）判过——而游戏可能压根没有这些功能。
+  // 市场证据描述的是"外面发生了什么"，不是"这个游戏有什么"，两者不能混。
+  const text = `${b.title || ''} ${b.genre || ''} ${b.notes || ''} ${JSON.stringify(b.rules || {})}`;
+  // 情绪主题属于立项语境，不用于判定产品功能；单独留着给 VD-08 参考。
+  const contextText = `${b.emotion_theme || ''} ${b.trend_evidence || ''}`;
   const rules = b.rules || {};
   const items = [];
 
@@ -216,28 +224,51 @@ export function scoreBrief(brief, known) {
     manual: false
   });
 
-  // VD-08 时间窗口：trend_evidence 要写出「势」的依据。
+  // VD-08 时间窗口：trend_evidence 要写出「势」的依据，并且**明确标方向**。
   //
-  // 只看长度是不够的：写「本品类当前无窗口期」也有 200 字，但那恰恰说明不该做。
-  // 所以分两件事判：
-  //   - 有没有写（没写 = 没想过，判否）
-  //   - 写的是正向还是负向（负向结论一样有价值，但要把 verdict 引到"别做"）
+  // 这里经历过两次迭代：
+  //   1. 只看长度 ≥10 字 → 写「本品类无窗口期」也判过，把最该砍的结论判成通过。
+  //   2. 加负向关键词表 → 表外的说法全漏（「就是送死」「赛道凉了」「挤不进去」
+  //      「看不到机会」实测 5/5 漏网），而且正向文本里偶现「不宜」还会误杀。
+  //
+  // 关键词识别负向是不可靠的——自然语言里表达"别做"的方式无穷多。所以改成
+  // **显式字段** trend_direction: 'positive' | 'negative'，由写证据的人直接标。
+  // 机器不猜语义，只读标记。
+  //
+  // 兼容：没有 trend_direction 时退回关键词启发式，但只作为提示，
+  // 不据此触发砍线——避免"猜错方向"造成虚假的 proceed 或虚假的 drop。
   const te = String(b.trend_evidence || '').trim();
-  const NEGATIVE = /无窗口期|没有窗口|不建议|不宜|下行|萎缩|已饱和|接盘|不占势|未进榜|没有机会/;
   const hasTrend = te.length >= 10;
-  const negative = hasTrend && NEGATIVE.test(te);
+  const declared = String(b.trend_direction || '').toLowerCase();
+  const NEGATIVE_HINT = /无窗口期|没有窗口|不建议|不宜|下行|萎缩|已饱和|接盘|不占势|未进榜|没有机会|送死|凉了|挤不进去|看不到机会|竞争激烈/;
+  const hinted = hasTrend && NEGATIVE_HINT.test(te);
+  // 有显式字段就以它为准；没有就用启发式当"疑似"，但不触发砍线
+  const direction = declared === 'negative' ? 'negative'
+    : declared === 'positive' ? 'positive'
+      : (hinted ? 'suspected-negative' : 'unset');
+
   items.push({
     id: 'VD-08',
     ok: hasTrend,
     label: '时间窗口',
+    // 常见三种情况：
+    //   negative          已标负向 → 触发砍线
+    //   suspected-negative 措辞像负向但没标 → 需要人确认方向，不触发砍线
+    //   unset             完全没线索 → 也需要人确认方向
+    // 后两种都置 needsDirection，让上层提示补字段。
+    needsDirection: hasTrend && direction !== 'positive' && direction !== 'negative',
     detail: !hasTrend
       ? 'brief 没写 trend_evidence（凭什么现在是这个题材的窗口期）'
-      : negative
-        ? `已写，但结论是负向：${te.slice(0, 70)}…（依据充分，所以本项通过；但它说明不该做）`
-        : `trend_evidence: ${te.slice(0, 60)}`,
+      : direction === 'negative'
+        ? `结论负向：${te.slice(0, 70)}…（依据充分，本项通过；但它说明不该做）`
+        : direction === 'suspected-negative'
+          ? `疑似负向但未标注 trend_direction：${te.slice(0, 60)}…（请补 trend_direction: negative/positive，机器不猜）`
+          : direction === 'positive'
+            ? `trend_evidence: ${te.slice(0, 60)}`
+            : `trend_evidence: ${te.slice(0, 60)}（未标 trend_direction）`,
     manual: false,
-    // 负向依据：项算通过（你确实做了判断），但要单独标出来影响总评
-    negative
+    // 只有显式标注才算数；启发式命中的只提示
+    negative: hasTrend && direction === 'negative'
   });
 
   const passed = items.filter((i) => i.ok).length;
@@ -249,6 +280,9 @@ export function scoreBrief(brief, known) {
   // 负向依据：项本身通过（你做了判断），但结论就是「不该做」。
   // 这不该被"缺 2 条"的计数掩盖——证据说没势，比缺两条基因更该砍。
   const negativeTrend = items.filter((i) => i.id === 'VD-08' && i.ok && i.negative);
+  // 写了证据但没标方向：不触发砍线，但要显式提醒补字段——
+  // 否则机器只能猜，而猜错的代价是"该砍的没砍"。
+  const needsDirection = items.some((i) => i.needsDirection);
 
   const drop = autoFailed.length >= 2 || negativeTrend.length > 0;
   return {
@@ -263,9 +297,12 @@ export function scoreBrief(brief, known) {
     humanCount: human.length,
     unmeasuredCount: unmeasured.length,
     negativeTrend: negativeTrend.length > 0,
+    needsDirection,
     verdict: drop ? 'suggest-drop' : 'proceed',
     note: negativeTrend.length
       ? 'trend_evidence 的结论是负向（当前没有窗口期）——按规则建议别做'
+      : needsDirection
+        ? 'trend_evidence 未标 trend_direction（positive/negative），机器不猜方向，请补这个字段'
       : autoFailed.length >= 2
         ? `${autoFailed.length} 项自动判定未过（${autoFailed.map((i) => i.label).join('、')}），按规则建议别做`
         : autoFailed.length === 1
@@ -343,10 +380,13 @@ export function reconcileGates(gate1, gate2Items) {
     reconciled: true,
     // 负向趋势依据与"缺 2 条"一样触发砍线，不能被实测修正掩盖
     negativeTrend: Boolean(gate1.negativeTrend) || items.some((i) => i.id === 'VD-08' && i.ok && i.negative),
+    needsDirection: Boolean(gate1.needsDirection),
     verdict: (autoFailed.length >= 2 || gate1.negativeTrend || items.some((i) => i.id === 'VD-08' && i.ok && i.negative))
       ? 'suggest-drop' : 'proceed',
     note: (gate1.negativeTrend || items.some((i) => i.id === 'VD-08' && i.ok && i.negative))
       ? 'trend_evidence 的结论是负向（当前没有窗口期）——按规则建议别做'
+      : gate1.needsDirection
+        ? 'trend_evidence 未标 trend_direction（positive/negative），机器无法判断方向，请补字段'
       : autoFailed.length >= 2
         ? `${autoFailed.length} 项自动判定未过（${autoFailed.map((i) => i.label).join('、')}），按规则建议别做`
         : autoFailed.length === 1
