@@ -99,7 +99,18 @@ window.__ModuleLoader__.load({
 .gc-it .t{font-size:12.5px}
 .gc-it .d{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:3px;line-height:1.55;white-space:pre-line}
 .gc-it .ic{flex:none;width:16px;text-align:center}
-.gc-it .go{margin-left:auto;align-self:center;flex:none}
+/* 待办正文要能被按钮挤窄，长说明才不会把按钮顶出边界 */
+.gc-it-body{flex:1;min-width:0}
+.gc-it.has-go:hover{background:var(--dsw-alias-interactive-bg-hover)}
+/* 有动作的待办，按钮组右对齐、不参与换行 */
+.gc-it .go{margin-left:auto;align-self:flex-start;flex:none;display:flex;gap:6px;align-items:center}
+.gc-link{display:inline-flex;align-items:center;text-decoration:none}
+/* "要改代码"这类既不是按钮、也不该长得像按钮的标注 */
+.gc-tag{font-size:11.5px;color:var(--dsw-alias-label-tertiary);
+  padding:3px 9px;border-radius:999px;border:1px dashed var(--dsw-alias-border-l3);white-space:nowrap}
+/* 从待办跳进表单时，短暂标出该改的那个字段 */
+.gc-field .gc-hit{border-color:var(--dsw-alias-brand-primary)!important;
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-brand-primary) 18%,transparent)}
 .gc-empty{padding:28px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px}
 .gc-job{border:1px solid var(--dsw-alias-border-l2);border-radius:9px;overflow:hidden;margin-bottom:16px}
 .gc-job .hd{padding:8px 12px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l2);font-size:12px;font-weight:500;display:flex;align-items:center;gap:7px}
@@ -383,14 +394,15 @@ window.__ModuleLoader__.load({
         });
       }, []);
 
-      /** 改已有游戏：用快照里带的 brief 预填，字段与服务端 update 一一对应。 */
-      const openEdit = useCallback((game) => {
+      /** 改需求：用快照里带的 brief 预填，focus 指定打开后聚焦哪个字段。 */
+      const openEdit = useCallback((game, focus) => {
         const b = (game && game.state && game.state.brief) || {};
         setCreated(null);
         setCreateErr('');
         setDraft({
           mode: 'edit',
           project: game.project,
+          focus: focus || '',
           title: b.title || '',
           slug: '',
           genre: b.genre || '',
@@ -450,6 +462,24 @@ window.__ModuleLoader__.load({
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
       }, [draft, closeDraft]);
+
+      // 待办带 focus 打开时，把光标放到对应字段上——
+      // 否则用户还得自己在十几个输入框里找那个"该改的地方"。
+      useEffect(() => {
+        if (!draft || !draft.focus) return undefined;
+        const t = setTimeout(() => {
+          const el = document.getElementById(`gc-f-${draft.focus}`);
+          if (!el) return;
+          el.focus();
+          if (typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }
+          // 短暂高亮一下，让人知道是"这里"
+          el.classList.add('gc-hit');
+          setTimeout(() => el.classList.remove('gc-hit'), 1400);
+        }, 60);
+        return () => clearTimeout(t);
+      }, [draft]);
 
       const stats = useMemo(() => {
         const games = Array.isArray(state.games) ? state.games : [];
@@ -620,15 +650,58 @@ window.__ModuleLoader__.load({
             )),
             state.tasks.length === 0
               ? h('div', { className: 'gc-empty' }, '没有待办。')
-              : state.tasks.map((t) => h('div', { className: 'gc-it', key: t.id },
-                h('div', { className: 'ic gc-warn' }, t.deadline ? '⏱' : '◌'),
-                h('div', null,
-                  h('div', { className: 't' }, t.title),
-                  t.detail && h('div', { className: 'd' }, t.detail),
-                  t.deadline && h('div', { className: 'd', style: { color: 'var(--dsw-alias-state-error-primary)' } },
-                    `截止 ${String(t.deadline).replace('T', ' ').slice(0, 16)}`)
-                )
-              ))
+              : state.tasks.map((t) => {
+                const game = state.games.find((g) => g.project === t.project);
+                const canEdit = t.action === 'edit' && game;
+                const canDecide = t.action === 'decision' && game;
+                const canProbe = t.action === 'probe';
+                const needCode = t.action === 'fix-code';
+                // 外部入口：平台代办不了，至少别让人自己去找地址
+                const link = t.action === 'manual' && t.url ? t.url : '';
+                const hasGo = canEdit || canDecide || canProbe || needCode || link;
+
+                return h('div', { className: `gc-it${hasGo ? ' has-go' : ''}`, key: t.id },
+                  h('div', { className: `ic ${kindTone(t.kind)}` }, kindMark(t.kind, t.deadline)),
+                  h('div', { className: 'gc-it-body' },
+                    h('div', { className: 't' }, t.title),
+                    t.detail && h('div', { className: 'd' }, t.detail),
+                    t.deadline && h('div', { className: 'd', style: { color: 'var(--dsw-alias-state-error-primary)' } },
+                      `截止 ${String(t.deadline).replace('T', ' ').slice(0, 16)}`)
+                  ),
+                  hasGo && h('div', { className: 'go' },
+                    canEdit && h('button', {
+                      className: 'gc-btn sm',
+                      onClick: () => openEdit(game, t.focus || '')
+                    }, focusLabel(t.focus)),
+                    canDecide && h('button', {
+                      className: 'gc-btn sm',
+                      onClick: () => openEdit(game, 'trend_direction')
+                    }, '改需求'),
+                    canDecide && h('button', {
+                      className: 'gc-btn sm ghost',
+                      onClick: () => {
+                        if (typeof window !== 'undefined' && window.confirm && !window.confirm(`把「${t.title_game || t.project}」移到归档区？\n\n不删任何文件，之后可以从 _archive/ 手动移回。`)) return;
+                        archiveGame(t.project, '基因砍线');
+                      }
+                    }, '归档'),
+                    canProbe && h('button', {
+                      className: 'gc-btn sm',
+                      disabled: state.jobRunning,
+                      title: '起浏览器重测产物，不采信 brief 自述',
+                      onClick: () => startBuild(t.project, 'web', 'probe')
+                    }, '重测'),
+                    // 改需求改不了代码雷同这类问题。老实写"要改代码"，
+                    // 比给一个点了没反应的按钮强。
+                    needCode && h('span', { className: 'gc-tag' }, '要改代码'),
+                    link && h('a', {
+                      className: 'gc-btn sm gc-link',
+                      href: link,
+                      target: '_blank',
+                      rel: 'noreferrer noopener'
+                    }, '打开后台 ↗')
+                  )
+                );
+              })
           ),
 
           h('p', { className: 'gc-hint' },
@@ -662,6 +735,35 @@ window.__ModuleLoader__.load({
           }
         })
       );
+    }
+
+    /** 待办的左边标记：类型决定符号，有截止时间的优先显示时钟。 */
+    function kindMark(kind, deadline) {
+      if (deadline) return '⏱';
+      return {
+        'audit-block': '⊘',
+        'viral-drop': '✕',
+        'viral-direction': '?',
+        'probe-fail': '◐'
+      }[kind] || '◌';
+    }
+
+    function kindTone(kind) {
+      if (kind === 'audit-block' || kind === 'viral-drop' || kind === 'probe-fail') return 'gc-err';
+      if (kind === 'viral-direction') return 'gc-warn';
+      return 'gc-warn';
+    }
+
+    /** 待办按钮文案说清点下去会改哪个字段，别让人点了才知道。 */
+    function focusLabel(focus) {
+      return {
+        notes: '改规则描述',
+        iap: '关掉内购',
+        trend_direction: '补趋势方向',
+        title: '改游戏名',
+        share: '补分享机制',
+        genre: '改玩法类型'
+      }[focus] || '改需求';
     }
 
     /* ---------- 新建游戏弹层 ---------- */

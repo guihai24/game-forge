@@ -26,6 +26,13 @@ import { scoreBrief, verdictSummary, reconcileGates } from '../engine/scripts/vi
 export const name = '@guihai24/dsh-game-console';
 export const inject = ['workingDirectory', 'sessions'];
 
+/** 各渠道「必须本人操作」的入口。平台不代办，但可以少让人自己找。 */
+const MANUAL_LINKS = {
+  wechat: 'https://mp.weixin.qq.com/',
+  taptap: 'https://developer.taptap.cn/',
+  crazygames: 'https://developer.crazygames.com/'
+};
+
 /* ---------- 文件读取 ---------- */
 const SKIP = new Set([
   'node_modules', '.git', 'dist', 'targets', '.pipeline', '.forge',
@@ -139,13 +146,40 @@ function loadState(dir) {
   return inferState(dir, brief);
 }
 
-/** 汇总所有待办：state 里存的 + 从阶段推出来的（阶段 automated=false 且 active） */
+/** 自审阻断 → 该去表单里改哪个字段。
+ *
+ * 阻断项几乎都能追到 brief 里的某个字段被写错了，所以点待办直接
+ * 打开改需求表单、把光标放到那个字段上。追不到具体字段的（同质化、
+ * 体积超限这类要改代码或资源的），返回空——那种事改 brief 没用，
+ * 不能假装能一键修好。
+ */
+function auditFocus(id) {
+  return {
+    gambling: 'notes',
+    fanwork: 'notes',
+    piracy: 'notes',
+    illegal: 'notes',
+    'brand-ip': 'notes',
+    'iap-without-isbn': 'iap',
+    'virtual-pay-individual': 'notes',
+    'external-links': 'notes',
+    'identical-code': '',      // 要改游戏代码，不是改需求
+    'template-app': '',        // 要换工程
+    oversize: ''               // 要减资源体积
+  }[id] || '';
+}
+
+/** 待办队列：需求里存的 + 从阶段/自审/基因/实测推出来的。 */
 function collectTasks(games) {
   const out = [];
   for (const g of games) {
     for (const t of g.state.tasks || []) {
       if (t.status && t.status !== 'open') continue;
-      out.push({ ...t, project: g.project, title_game: g.state.title });
+      // 台账里手写的待办没有 action 字段，按 channel 补出来：
+      // 界面靠它决定点下去干什么。缺省给 manual——平台替代不了的事，
+      // 唯一正确的动作就是把人和渠道入口接上，而不是假装能代办。
+      const derived = t.action ? {} : { action: 'manual', url: MANUAL_LINKS[t.channel] || '' };
+      out.push({ ...t, ...derived, project: g.project, title_game: g.state.title });
     }
     for (const [chan, ch] of Object.entries(g.state.channels || {})) {
       for (const st of ch.stages || []) {
@@ -160,6 +194,10 @@ function collectTasks(games) {
           channel: chan,
           project: g.project,
           title_game: g.state.title,
+          // 平台替代不了的事，界面能做的是把人送到对的地方去，
+          // 所以带上外部操作入口（没有就只给文字说明）。
+          action: 'manual',
+          url: MANUAL_LINKS[chan] || '',
           createdAt: ch.updatedAt
         });
       }
@@ -174,6 +212,13 @@ function collectTasks(games) {
         detail: i.hint || '规则见 engine/references/rules/channel-rules.md',
         project: g.project,
         title_game: g.state.title,
+        // 待办要能点：点了干什么由服务端说清，界面不猜。
+        // 能追到 brief 字段的 → 打开改需求表单并聚焦那个字段；
+        // 追不到的（代码雷同、体积超限）→ 改需求没用，如实说"要改代码"，
+        // 不给一个点了也没用的按钮。
+        ...(auditFocus(i.id)
+          ? { action: 'edit', focus: auditFocus(i.id) }
+          : { action: 'fix-code', focus: '' }),
         createdAt: new Date().toISOString()
       });
     }
@@ -193,6 +238,9 @@ function collectTasks(games) {
           : `未过：${missing.join('、') || '—'}。砍线只算能机器判的项，人工项另需确认。规则见 viral-dna-rules.md`,
         project: g.project,
         title_game: g.state.title,
+        // 砍线要么改需求翻盘，要么归档掉。两种都摆出来，让人当场决定。
+        action: 'decision',
+        focus: '',
         createdAt: new Date().toISOString()
       });
     }
@@ -207,6 +255,8 @@ function collectTasks(games) {
         detail: 'brief 里写了趋势依据但没写 trend_direction（positive / negative）。机器不猜方向，所以 VD-08 判不出该不该砍。补上这个字段即可。规则见 viral-dna-rules.md',
         project: g.project,
         title_game: g.state.title,
+        action: 'edit',
+        focus: 'trend_direction',
         createdAt: new Date().toISOString()
       });
     }
@@ -223,6 +273,8 @@ function collectTasks(games) {
           detail: `${bad.map((i) => `${i.label}：${i.detail}`).join('；')}。针对产物，不看 brief 怎么说`,
           project: g.project,
           title_game: g.state.title,
+          // 实测未达是代码问题，改 brief 没用，只能重跑实测确认或去改代码
+          action: 'probe',
           createdAt: new Date().toISOString()
         });
       }
