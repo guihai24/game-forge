@@ -311,6 +311,45 @@ function coverOf(dir) {
   return null;
 }
 
+/* ---------- 需求自审 ---------- *
+ *
+ * 合规（能不能上架）和基因（值不值得上架）两层一起跑，结果同一份形状，
+ * create 和 update 共用——两边各写一遍就会慢慢走偏。
+ */
+async function auditBrief(brief) {
+  let audit = null;
+  let viral = null;
+  try {
+    const { makeReport, checkBrief } = await import('../engine/scripts/precheck-lib.mjs');
+    const { scoreBrief } = await import('../engine/scripts/viral-dna-lib.mjs');
+    const report = makeReport();
+    checkBrief(brief, brief.target === 'wechat' ? 'wechat' : 'taptap', report);
+    audit = {
+      ok: !report.blocked.length,
+      blocked: report.blocked.length,
+      warned: report.warned.length,
+      items: report.items
+    };
+    const g1 = scoreBrief(brief, { offline: brief.offline, iap: brief.iap });
+    viral = {
+      score: g1.score,
+      total: g1.total,
+      verdict: g1.verdict,
+      negativeTrend: Boolean(g1.negativeTrend),
+      needsDirection: Boolean(g1.needsDirection),
+      note: g1.note,
+      failed: g1.failed.map((i) => ({
+        id: i.id, label: i.label, detail: i.detail,
+        needsHuman: Boolean(i.needsHuman), unmeasured: Boolean(i.unmeasured)
+      }))
+    };
+  } catch (e) {
+    // 自审跑挂了不该让写 brief 失败——brief 已经落盘了
+    viral = { error: String(e && e.message ? e.message : e) };
+  }
+  return { audit, viral };
+}
+
 /* ---------- 新建游戏 ---------- *
  *
  * 只做到"落 brief + 跑 Gate 1"。游戏本身由 Game Studio 生成，那一步不在这里做——
@@ -364,36 +403,74 @@ async function createGame(root, payload) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'game.brief.json'), `${JSON.stringify(brief, null, 2)}\n`, 'utf8');
 
-  // 当场跑两层自审：合规 + 基因。基因分是这次新建的核心产出。
-  let audit = null;
-  let viral = null;
-  try {
-    const { makeReport, checkBrief } = await import('../engine/scripts/precheck-lib.mjs');
-    const { scoreBrief } = await import('../engine/scripts/viral-dna-lib.mjs');
-    const report = makeReport();
-    checkBrief(brief, brief.target === 'wechat' ? 'wechat' : 'taptap', report);
-    audit = {
-      ok: !report.blocked.length,
-      blocked: report.blocked.length,
-      warned: report.warned.length,
-      items: report.items
-    };
-    const g1 = scoreBrief(brief, { offline: brief.offline, iap: brief.iap });
-    viral = {
-      score: g1.score,
-      total: g1.total,
-      verdict: g1.verdict,
-      negativeTrend: Boolean(g1.negativeTrend),
-      needsDirection: Boolean(g1.needsDirection),
-      note: g1.note,
-      failed: g1.failed.map((i) => ({ id: i.id, label: i.label, detail: i.detail, needsHuman: Boolean(i.needsHuman) }))
-    };
-  } catch (e) {
-    // 自审跑挂了不该让新建失败——brief 已经落盘了
-    viral = { error: String(e && e.message ? e.message : e) };
+  const { audit, viral } = await auditBrief(brief);
+  return { project: `games/${slug}`, dir, brief, audit, viral };
+}
+
+/* ---------- 改已有游戏的 brief ---------- *
+ *
+ * 只覆盖面板能编辑的那几个字段，其余（acceptance、channel.appid、rules 里
+ * 没暴露的键）原样保留——一次编辑不该顺手把别人手写的字段冲掉。
+ *
+ * 改完必须重跑两层自审：分数是 brief 的函数，改完不重算，
+ * 看板上就会挂着旧结论，那比不显示更糟。
+ */
+async function updateBrief(root, payload) {
+  const project = String(payload.project || '');
+  if (!project) throw new Error('update 需要 project');
+  const rootAbs = path.resolve(root);
+  const dir = path.resolve(root, project);
+  if (!dir.startsWith(rootAbs)) throw new Error('项目路径越界');
+  const file = path.join(dir, 'game.brief.json');
+  if (!fs.existsSync(file)) throw new Error(`${project} 里没有 game.brief.json`);
+
+  const prev = readJson(file) || {};
+  const next = {
+    ...prev,
+    version: prev.version || 1,
+    title: String(payload.title !== undefined ? payload.title : prev.title || '').trim(),
+    genre: String(payload.genre !== undefined ? payload.genre : prev.genre || '').trim(),
+    notes: String(payload.notes !== undefined ? payload.notes : prev.notes || '').trim(),
+    offline: payload.offline !== undefined ? payload.offline !== false : prev.offline !== false,
+    iap: payload.iap !== undefined ? payload.iap === true : prev.iap === true,
+    share: payload.share !== undefined
+      ? (String(payload.share).trim() ? { kind: String(payload.share).trim() } : null)
+      : (prev.share || null),
+    pace: String(payload.pace !== undefined ? payload.pace : prev.pace || '').trim(),
+    emotion_theme: String(payload.emotion_theme !== undefined ? payload.emotion_theme : prev.emotion_theme || '').trim(),
+    trend_evidence: String(payload.trend_evidence !== undefined ? payload.trend_evidence : prev.trend_evidence || '').trim(),
+    trend_direction: payload.trend_direction !== undefined
+      ? (['positive', 'negative'].includes(payload.trend_direction) ? payload.trend_direction : '')
+      : (prev.trend_direction || ''),
+    rules: {
+      ...(prev.rules || {}),
+      duration: Number(payload.duration !== undefined ? payload.duration : (prev.rules && prev.rules.duration)) || 60,
+      hearts: Number(payload.hearts !== undefined ? payload.hearts : (prev.rules && prev.rules.hearts)) || 3
+    },
+    channel: {
+      ...(prev.channel || {}),
+      orientation: payload.orientation !== undefined
+        ? (payload.orientation === 'portrait' ? 'portrait' : 'landscape')
+        : ((prev.channel && prev.channel.orientation) || 'landscape')
+    }
+  };
+  if (!next.title) throw new Error('游戏名不能为空');
+
+  fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+
+  // 台账里缓存了 title/genre/offline，不同步的话看板会一直显示旧名字。
+  // 只补这几个能从 brief 推出来的字段，别的不碰。
+  const chain = readJson(statePath(dir));
+  if (chain) {
+    chain.title = next.title;
+    chain.genre = next.genre;
+    chain.offline = next.offline;
+    chain.orientation = next.channel.orientation;
+    writeJson(statePath(dir), chain);
   }
 
-  return { project: `games/${slug}`, dir, brief, audit, viral };
+  const { audit, viral } = await auditBrief(next);
+  return { project, dir, brief: next, audit, viral };
 }
 
 function slugify(s) {
@@ -475,6 +552,26 @@ function scanAll(root) {
           };
         })(),
         audit,
+        // brief 里能被面板编辑的字段。整份 brief 不传——acceptance、channel.appid
+        // 这些编辑器不碰，传过去只会诱导界面去改。
+        brief: (() => {
+          const b = readJson(path.join(dir, 'game.brief.json')) || {};
+          return {
+            title: b.title || '',
+            genre: b.genre || '',
+            notes: b.notes || '',
+            offline: b.offline !== false,
+            iap: b.iap === true,
+            share: b.share && b.share.kind ? String(b.share.kind) : '',
+            pace: b.pace || '',
+            emotion_theme: b.emotion_theme || '',
+            trend_evidence: b.trend_evidence || '',
+            trend_direction: b.trend_direction || '',
+            duration: (b.rules && b.rules.duration) || 60,
+            hearts: (b.rules && b.rules.hearts) || 3,
+            orientation: (b.channel && b.channel.orientation) || 'landscape'
+          };
+        })(),
         viral: gate1 ? {
           score: gate1.score,
           total: gate1.total,
@@ -747,8 +844,9 @@ export function apply(ctx, config = {}) {
    *
    * v2: audit / viral / probe
    * v3: cover
+   * v4: brief（面板内改需求要用）
    */
-  const SCHEMA = 3;
+  const SCHEMA = 4;
 
   /* 多实例共存：桌面应用和 `dsh --profile web` 会同时跑，共用同一个工作区。
    * 早期两份进程都往 <root>/.game-console/state.json 和 ~/.dsh/game-console/state.json
@@ -759,10 +857,28 @@ export function apply(ctx, config = {}) {
    * 面板按实例读自己的，互不覆盖。旧格式的 state.json 继续写，兼容老客户端。
    */
   function instanceId() {
-    // 同一进程内稳定即可：用 profile 名区分 desktop / web，缺省 desktop。
-    const profile = process.env.DSH_PROFILE || 'desktop';
+    // 同一进程内稳定即可，关键是要**把两个进程区分开**。
+    //
+    // 曾经只读 process.env.DSH_PROFILE。实测 `dsh --profile web` 并不会把
+    // profile 名写进这个环境变量——web 实例读到空值，退回 'desktop'，
+    // 于是桌面应用和 web 实例一直往同一个 state.desktop.json 里写，
+    // 互相覆盖。表现是面板时而显示新字段、时而显示旧结论（桌面进程跑的是
+    // 旧代码，它写 schema:3 的数据盖住了 web 写的 schema:4）。
+    //
+    // 现在按优先级取：显式环境变量 → 启动参数里的 --profile → 端口 → desktop。
+    const profile = process.env.DSH_PROFILE
+      || (() => {
+        const i = process.argv.findIndex((a) => a === '--profile' || a.startsWith('--profile='));
+        if (i < 0) return '';
+        const a = process.argv[i];
+        if (a.includes('=')) return a.slice(a.indexOf('=') + 1);
+        return process.argv[i + 1] || '';
+      })()
+      || '';
+    const base = profile || 'desktop';
+    // 端口也带上：同 profile 起两个实例（比如两个 web 探针）时不至于撞车。
     const port = process.env.PORT || '';
-    return port ? `${profile}-${port}` : profile;
+    return port ? `${base}-${port}` : base;
   }
 
   /** 把当前扫描结果落到工作区，供面板读取。 */
@@ -898,6 +1014,7 @@ export function apply(ctx, config = {}) {
           if (!root) return respond(500, { ok: false, error: '找不到工作区' });
           let out;
           if (action === 'create') out = await createGame(root, payload);
+          else if (action === 'update') out = await updateBrief(root, payload);
           else if (action === 'archive') out = archiveGame(root, payload);
           else if (action === 'restore') out = restoreGame(root, payload);
           else if (action === 'set-stage') out = setStage(root, payload);
@@ -969,6 +1086,11 @@ export function apply(ctx, config = {}) {
           }
           if (action === 'create') {
             const out = await createGame(root, payload);
+            publishSnapshot(root);
+            return { kind: 'success', text: JSON.stringify(out) };
+          }
+          if (action === 'update') {
+            const out = await updateBrief(root, payload);
             publishSnapshot(root);
             return { kind: 'success', text: JSON.stringify(out) };
           }

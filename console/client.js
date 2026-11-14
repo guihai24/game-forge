@@ -276,9 +276,10 @@ window.__ModuleLoader__.load({
     /* ---------- 主组件 ---------- */
     function ConsolePanel(props) {
       const [state, setState] = useState({ loading: true, games: [], tasks: [], error: null });
-      // 新建游戏弹层：null = 关闭，对象 = 正在编辑的表单
+      // 弹层状态：null = 关闭。对象里带 mode（create / edit）和 project。
+      // 新建和修改共用一套表单——两份表单必然走偏，加个字段只改一处。
       const [draft, setDraft] = useState(null);
-      // 新建后的自审结果：落盘成功但还没关弹层时显示
+      // 提交后的自审结果：落盘成功但还没关弹层时显示
       const [created, setCreated] = useState(null);
       const [creating, setCreating] = useState(false);
       const [createErr, setCreateErr] = useState('');
@@ -372,12 +373,39 @@ window.__ModuleLoader__.load({
         setCreated(null);
         setCreateErr('');
         setDraft({
+          mode: 'create', project: '',
           title: '', slug: '', genre: '', notes: '',
           target: 'wechat', orientation: 'landscape',
           duration: 60, hearts: 3,
           offline: true, iap: false, share: '',
           pace: '', emotion_theme: '',
           trend_evidence: '', trend_direction: ''
+        });
+      }, []);
+
+      /** 改已有游戏：用快照里带的 brief 预填，字段与服务端 update 一一对应。 */
+      const openEdit = useCallback((game) => {
+        const b = (game && game.state && game.state.brief) || {};
+        setCreated(null);
+        setCreateErr('');
+        setDraft({
+          mode: 'edit',
+          project: game.project,
+          title: b.title || '',
+          slug: '',
+          genre: b.genre || '',
+          notes: b.notes || '',
+          target: 'wechat',
+          orientation: b.orientation || 'landscape',
+          duration: Number(b.duration) || 60,
+          hearts: Number(b.hearts) || 3,
+          offline: b.offline !== false,
+          iap: b.iap === true,
+          share: b.share || '',
+          pace: b.pace || '',
+          emotion_theme: b.emotion_theme || '',
+          trend_evidence: b.trend_evidence || '',
+          trend_direction: b.trend_direction || ''
         });
       }, []);
 
@@ -397,8 +425,12 @@ window.__ModuleLoader__.load({
         setCreateErr('');
         try {
           if (!props.runCommand) throw new Error('命令通道不可用：请先在左侧打开一个会话');
-          const res = await props.runCommand(`/game-console create ${JSON.stringify(draft)}`);
-          if (!res || !res.ok) throw new Error((res && res.text) || '新建失败');
+          const isEdit = draft.mode === 'edit';
+          const line = isEdit
+            ? `/game-console update ${JSON.stringify(draft)}`
+            : `/game-console create ${JSON.stringify(draft)}`;
+          const res = await props.runCommand(line);
+          if (!res || !res.ok) throw new Error((res && res.text) || (isEdit ? '保存失败' : '新建失败'));
           let out = null;
           try { out = JSON.parse(res.text); } catch (e) { out = null; }
           if (!out) throw new Error(`服务端返回无法解析：${String(res.text).slice(0, 200)}`);
@@ -534,6 +566,12 @@ window.__ModuleLoader__.load({
                     }, '实测'),
                     h('button', {
                       className: 'gc-abtn',
+                      disabled: anyBusy,
+                      title: '改需求：改完立刻重新过合规 + 基因两道关',
+                      onClick: () => openEdit(g)
+                    }, '改需求'),
+                    h('button', {
+                      className: 'gc-abtn',
                       disabled: anyBusy || hasBlock,
                       title: hasBlock ? `有 ${blocks.length} 项合规阻断，先改` : '打成 TapTap 合规 zip',
                       onClick: () => startBuild(g.project, 'web', 'package-taptap')
@@ -616,7 +654,8 @@ window.__ModuleLoader__.load({
             setCreateErr('');
             setDraft((d) => (d ? {
               ...d,
-              title: '', slug: '', genre: '', notes: '',
+              mode: 'create', project: '', slug: '',
+              title: '', genre: '', notes: '',
               share: '', emotion_theme: '',
               trend_evidence: '', trend_direction: ''
             } : d));
@@ -636,14 +675,20 @@ window.__ModuleLoader__.load({
       const d = o.draft;
       const autoSlug = slugPreview(d.slug || d.title);
       const result = o.created;
+      const isEdit = d.mode === 'edit';
       return h('div', {
         className: 'gc-mask',
         onClick: (e) => { if (e.target === e.currentTarget) o.closeDraft(); }
       },
         h('div', { className: 'gc-modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'gc-modal-title' },
           h('div', { className: 'gc-modal-hd' },
-            h('h2', { id: 'gc-modal-title' }, result ? '自审结果' : '新建游戏'),
-            !result && h('span', { className: 'gc-sub' }, '先过需求阶段的合规 + 爆款基因两道关'),
+            h('h2', { id: 'gc-modal-title' }, result
+              ? (isEdit ? '改完的自审结果' : '自审结果')
+              : (isEdit ? '改需求' : '新建游戏')),
+            !result && h('span', { className: 'gc-sub' },
+              isEdit
+                ? '改完保存会重跑合规 + 基因，看板上的结论跟着变'
+                : '先过需求阶段的合规 + 爆款基因两道关'),
             h('button', { className: 'gc-modal-x', onClick: o.closeDraft, 'aria-label': '关闭弹层' }, '✕')
           ),
 
@@ -657,17 +702,24 @@ window.__ModuleLoader__.load({
                 h('button', { className: 'gc-btn', onClick: o.closeDraft, key: 'close' }, '关闭'),
                 h('span', { className: 'gc-grow', key: 'g' }),
                 h('button', { className: 'gc-btn', onClick: o.back, key: 'back' }, '改一下再试'),
-                h('button', { className: 'gc-new', key: 'again', onClick: o.reset }, '再建一个')
+                // 改需求不该出现「再建一个」——用户的意图是改这一款，不是开工新款
+                !isEdit && h('button', { className: 'gc-new', key: 'again', onClick: o.reset }, '再建一个')
               ]
               : [
                 o.createErr && h('span', { className: 'gc-note bad', style: { flex: 1 } }, o.createErr),
-                !o.createErr && h('span', { className: 'gc-note', style: { flex: 1 } }, '只会生成 game.brief.json，不会生成游戏代码'),
+                !o.createErr && h('span', {
+                  className: 'gc-note', style: { flex: 1 }
+                }, isEdit
+                  ? '只改 brief，不重新构建；改完这道闸点「构建」才生效'
+                  : '只会生成 game.brief.json，不会生成游戏代码'),
                 h('button', { className: 'gc-btn', onClick: o.closeDraft, disabled: o.creating, key: 'cancel' }, '取消'),
                 h('button', {
                   className: 'gc-new', key: 'ok',
                   disabled: o.creating || !String(d.title || '').trim(),
                   onClick: o.submitDraft
-                }, o.creating ? '创建中…' : '创建并自审')
+                }, o.creating
+                  ? (isEdit ? '保存中…' : '创建中…')
+                  : (isEdit ? '保存并重新自审' : '创建并自审'))
               ]
           )
         )
@@ -695,6 +747,7 @@ window.__ModuleLoader__.load({
       const bool = (v) => v === 'true';
 
       const notesLen = String(d.notes || '').length;
+      const isEdit = d.mode === 'edit';
 
       return h('div', { className: 'gc-result' },
 
@@ -702,11 +755,16 @@ window.__ModuleLoader__.load({
           f('title', '游戏名',
             input('title', { placeholder: '潮汐逃亡', autoFocus: true }),
             '会写进 brief.title，也显示在看板上'),
-          f('slug', '目录名',
-            input('slug', { placeholder: autoSlug || 'tide-escape' }),
-            d.slug
-              ? `games/${autoSlug || '…'}`
-              : (autoSlug ? `留空则用 games/${autoSlug}` : '中文名生成不出目录名，必须手填，用小写字母/数字/连字符'))
+          // 目录名只在新建时可填：改了等于换工程，会把产物、台账全甩开。
+          isEdit
+            ? f('slug', '目录名',
+              h('input', { id: 'gc-f-slug', value: d.project || '', disabled: true, readOnly: true }),
+              '改需求不改目录名——换目录等于换一个工程')
+            : f('slug', '目录名',
+              input('slug', { placeholder: autoSlug || 'tide-escape' }),
+              d.slug
+                ? `games/${autoSlug || '…'}`
+                : (autoSlug ? `留空则用 games/${autoSlug}` : '中文名生成不出目录名，必须手填，用小写字母/数字/连字符'))
         ),
 
         h('div', { className: 'gc-row' },
@@ -883,7 +941,7 @@ window.__ModuleLoader__.load({
           h('div', { style: { fontWeight: 500, color: 'var(--dsw-alias-label-primary)', marginBottom: 4 } },
             '下一步'),
           drop || blocks.length
-            ? '点「改一下再试」补上缺的字段，退回表单重新自审。不想做就点「关闭」，把目录删掉，别让它占位。'
+            ? '点「改一下再试」补上缺的字段，保存即重算。不做就点「关闭」，然后从卡片上归档，别让它占位。'
             : `去对话里让 Game Studio 按 ${r.project}/game.brief.json 生成游戏，生成完回看板点「构建」。`,
           h('div', { className: 'gc-path', style: { marginTop: 8 } }, r.project)
         )
