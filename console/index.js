@@ -189,7 +189,7 @@ function collectTasks(games) {
         title: `${g.state.title} · 基因 ${v.score}/${v.total}，建议砍掉`,
         // 负向趋势依据优先级最高：它说明的不是"缺基因"，而是"这个品类现在不该做"
         detail: v.negativeTrend
-          ? `trend_evidence 的结论是负向：当前没有窗口期。这条比缺基因更硬——依据充分说明不该做。见 references/research/2026-11-14-viral-window.md`
+          ? `trend_evidence 的结论是负向：当前没有窗口期。这条比缺基因更硬——依据充分说明不该做。`
           : `未过：${missing.join('、') || '—'}。砍线只算能机器判的项，人工项另需确认。规则见 viral-dna-rules.md`,
         project: g.project,
         title_game: g.state.title,
@@ -532,6 +532,14 @@ function startRun(root, payload) {
     for (const raw of String(buf).split('\n')) {
       const line = raw.trim();
       if (!line) continue;
+      // probe 的输出是 JSON，逐行读进 job.line 会让面板最终停在 "}" 上
+      // （实测出现过：任务卡片里只剩一个花括号）。进展改用固定文案。
+      if (action === 'probe') {
+        if (/^\s*[{}\[\]",]+\s*$/.test(line)) continue;   // 跳过纯结构行
+        job.line = '正在实测产物…';
+        dirty = true;
+        continue;
+      }
       job.line = line;
       job.log.push(line);
       if (job.log.length > 300) job.log.shift();
@@ -558,6 +566,8 @@ function startRun(root, payload) {
         });
         job.probeOk = g2 ? g2.ok : true;
         job.probeSummary = g2 ? g2.summary : '';
+        // 结果已经解析出来了，把这行"正在实测产物…"换成结论
+        job.line = g2 && g2.summary ? g2.summary : '实测完成';
         if (code === 2) code = 0;
       } catch (e) { /* JSON 没解析出来就照原样判失败 */ }
     }

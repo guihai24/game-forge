@@ -43,16 +43,18 @@ window.__ModuleLoader__.load({
 .gc-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .gc-btn.primary{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:#fff}
 .gc-btn.sm{padding:3px 9px;font-size:11.5px}
+.gc-btn.ghost{border-color:transparent;color:var(--dsw-alias-label-tertiary);padding-left:6px;padding-right:6px}
+.gc-btn.ghost:hover{color:var(--dsw-alias-state-error-primary);background:transparent;border-color:var(--dsw-alias-border-l3)}
 .gc-scroll{overflow:auto;padding:14px 18px 40px}
 .gc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
 .gc-stat{border:1px solid var(--dsw-alias-border-l2);border-radius:9px;padding:10px 12px}
 .gc-stat .k{font-size:11px;color:var(--dsw-alias-label-tertiary);margin-bottom:3px}
 .gc-stat .v{font-size:19px;font-weight:600}
 .gc-stat .v small{font-size:12px;font-weight:400;color:var(--dsw-alias-label-tertiary);margin-left:3px}
-.gc-board{border:1px solid var(--dsw-alias-border-l2);border-radius:9px;overflow:hidden;margin-bottom:16px}
+.gc-board{border:1px solid var(--dsw-alias-border-l2);border-radius:9px;overflow:hidden;margin-bottom:24px}
 .gc-board table{width:100%;border-collapse:collapse}
 .gc-board th{font-size:11px;font-weight:500;color:var(--dsw-alias-label-tertiary);text-align:left;padding:8px 12px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l2);white-space:nowrap}
-.gc-board td{padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-l2);vertical-align:middle}
+.gc-board td{padding:12px 12px;border-bottom:1px solid var(--dsw-alias-border-l2);vertical-align:middle}
 .gc-board tr:last-child td{border-bottom:0}
 .gc-board tbody tr:hover td{background:var(--dsw-alias-interactive-bg-hover)}
 .gc-name{font-weight:500}
@@ -61,9 +63,12 @@ window.__ModuleLoader__.load({
 .gc-verdict.good{color:var(--dsw-alias-state-success-primary)}
 .gc-verdict.weak{color:var(--dsw-alias-state-warn-primary)}
 .gc-verdict.bad{color:var(--dsw-alias-state-error-primary)}
-.gc-st{display:inline-flex;align-items:center;gap:5px;font-size:12px}
+.gc-st{display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap}
 .gc-ok{color:var(--dsw-alias-state-success-primary)}
 .gc-warn{color:var(--dsw-alias-state-warn-primary)}
+.gc-dots{display:inline-flex;gap:2px;margin-right:3px}
+.gc-dots i{display:block;width:3px;height:9px;border-radius:1px;background:currentColor;opacity:.18}
+.gc-dots i.on{opacity:.85}
 .gc-err{color:var(--dsw-alias-state-error-primary)}
 .gc-none{color:var(--dsw-alias-label-tertiary)}
 .gc-run{color:var(--dsw-alias-brand-primary)}
@@ -101,9 +106,15 @@ window.__ModuleLoader__.load({
       const failed = ch.stages.find((s) => s.status === 'failed' || s.status === 'blocked');
       const allDone = ch.stages.every((s) => s.status === 'done' || s.status === 'skipped');
       if (failed) {
-        // 失败/受阻要显眼：说清卡在哪一步，并带上原因的前半句
-        const why = failed.note ? ` · ${String(failed.note).split(/[。；\n]/)[0].slice(0, 28)}` : '';
-        return { tone: 'err', mark: failed.status === 'blocked' ? '⊘' : '✕', text: failed.label + why };
+        // 失败/受阻：单元格只放"卡在哪一步 "+ 一个极短的原因关键词，
+        // 完整原因进 title。列宽只有 13%，塞长句会折成 4 行、把整行撑高，
+        // 反而让真正的问题（合规阻断）不明显。
+        return {
+          tone: 'err',
+          mark: failed.status === 'blocked' ? '⊘' : '✕',
+          text: failed.label,
+          title: failed.note || failed.label
+        };
       }
       if (allDone) return { tone: 'ok', mark: '●', text: '已上线' };
       if (active) return { tone: active.automated === false ? 'warn' : 'run', mark: '◐', text: active.label };
@@ -251,9 +262,9 @@ window.__ModuleLoader__.load({
             h('table', null,
               h('thead', null, h('tr', null,
                 h('th', { style: { width: '24%' } }, '游戏 / 值不值得上架'),
-                CHANNELS.map((c) => h('th', { key: c.id, style: { width: '13%' } }, c.label)),
-                h('th', { style: { width: '78px' } }, '合规'),
-                h('th', { style: { width: '78px' } }, '基因'),
+                CHANNELS.map((c) => h('th', { key: c.id, style: { width: '12%' } }, c.label)),
+                h('th', { style: { width: '92px' } }, '合规'),
+                h('th', { style: { width: '92px' } }, '基因'),
                 h('th', { style: { width: '120px', textAlign: 'right' } }, '')
               )),
               h('tbody', null,
@@ -287,8 +298,8 @@ window.__ModuleLoader__.load({
                             style: g.state.probe.stale ? { color: 'var(--dsw-alias-state-warn-primary)' } : undefined,
                             title: `实测于 ${String(g.state.probe.at || '').replace('T', ' ').slice(0, 16)}`
                           }, g.state.probe.stale
-                            ? `实测已过期（构建后有改动）：${g.state.probe.summary}`
-                            : `实测：${g.state.probe.summary}`)
+                            ? `⚠ 实测已过期（构建后有改动）：${g.state.probe.summary}`
+                            : g.state.probe.summary)
                           : null
                       ),
                       CHANNELS.map((c) => {
@@ -302,7 +313,8 @@ window.__ModuleLoader__.load({
                         const s = stageSummary(channels[c.id]);
                         const cls = s ? { ok: 'gc-ok', warn: 'gc-warn', err: 'gc-err', run: 'gc-run', none: 'gc-none' }[s.tone] : 'gc-none';
                         return h('td', { key: c.id },
-                          h('span', { className: `gc-st ${cls}` }, s ? `${s.mark} ${s.text}` : '—')
+                          h('span', { className: `gc-st ${cls}`, title: s && s.title ? s.title : undefined },
+                            s ? `${s.mark} ${s.text}` : '—')
                         );
                       }),
                       h('td', null,
@@ -344,6 +356,14 @@ window.__ModuleLoader__.load({
                             v.summary
                           ].filter((x) => x !== null).join('\n');
                           return h('span', { className: `gc-st ${tone}`, title: tip },
+                            // 光看 "5/8" 不知道算好算坏，配一条 8 格的进度条让程度可见。
+                            // 已达标的格用当前色，未达标用极淡的底色。
+                            h('span', { className: 'gc-dots', 'aria-hidden': 'true' },
+                              Array.from({ length: v.total }, (_, i) => h('i', {
+                                key: i,
+                                className: i < v.score ? 'on' : ''
+                              }))
+                            ),
                             `${v.score}/${v.total}`,
                             v.needsDirection
                               ? h('span', { className: 'gc-warn', style: { fontSize: 10, marginLeft: 2 } }, '⚠方向')
@@ -387,9 +407,11 @@ window.__ModuleLoader__.load({
                                 : 'Gate 2：起浏览器实测分享/反馈延迟/单局时长/冷启动，不采信 brief 自述',
                               onClick: () => startBuild(g.project, 'web', 'probe')
                             }, '实测'),
+                            // 归档是销毁性动作（虽然可恢复），不该和构建按钮平级。
+                            // 用分隔线隔开 + 弱化文字样式，避免误点。
+                            h('span', { style: { margin: '0 2px 0 10px', color: 'var(--dsw-alias-border-l3)' } }, '|'),
                             h('button', {
-                              className: 'gc-btn sm',
-                              style: { marginLeft: 6 },
+                              className: 'gc-btn sm gc-btn-ghost',
                               disabled: anyBusy,
                               title: '移到 _archive/，不再出现在看板上。不删文件，可恢复。',
                               onClick: () => {
