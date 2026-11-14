@@ -35,12 +35,18 @@ window.__ModuleLoader__.load({
     /* ---------- 样式：只用 --dsw-alias-* token，跟随宿主主题 ---------- */
     const CSS = `
 .gc-root{height:100%;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:13px}
+/* 全局兜底：面板内任何可聚焦元素都必须有可见焦点环。
+   宿主样式会清掉 outline，不给个兜底键盘就没法用。 */
+.gc-root :focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
 .gc-top{height:46px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid var(--dsw-alias-border-l2)}
 .gc-top h1{font-size:14px;font-weight:600;margin:0}
 .gc-sub{font-size:12px;color:var(--dsw-alias-label-tertiary)}
 .gc-grow{flex:1}
-.gc-btn{font:inherit;font-size:12px;padding:5px 11px;border-radius:7px;cursor:pointer;border:1px solid var(--dsw-alias-border-l3);background:transparent;color:inherit}
+.gc-btn{font:inherit;font-size:12px;padding:5px 11px;border-radius:7px;cursor:pointer;border:1px solid var(--dsw-alias-border-l3);background:transparent;color:inherit;transition:background-color .12s,border-color .12s,color .12s}
 .gc-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
+/* 焦点必须可见：宿主把默认 outline 清了，这里补回来。
+   用 :focus-visible 而不是 :focus，避免鼠标点击后也出现焦点环。 */
+.gc-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:7px}
 .gc-btn.primary{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:#fff}
 .gc-btn.sm{padding:3px 9px;font-size:11.5px}
 .gc-btn.ghost{border-color:transparent;color:var(--dsw-alias-label-tertiary);padding-left:6px;padding-right:6px}
@@ -49,36 +55,38 @@ window.__ModuleLoader__.load({
 .gc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
 .gc-stat{border:1px solid var(--dsw-alias-border-l2);border-radius:9px;padding:10px 12px}
 .gc-stat .k{font-size:11px;color:var(--dsw-alias-label-tertiary);margin-bottom:3px}
-.gc-stat .v{font-size:19px;font-weight:600}
+.gc-stat .v{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
 .gc-stat .v small{font-size:12px;font-weight:400;color:var(--dsw-alias-label-tertiary);margin-left:3px}
 .gc-board{border:1px solid var(--dsw-alias-border-l2);border-radius:9px;overflow:hidden;margin-bottom:24px}
-.gc-board table{width:100%;border-collapse:collapse}
-.gc-board th{font-size:11px;font-weight:500;color:var(--dsw-alias-label-tertiary);text-align:left;padding:8px 12px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l2);white-space:nowrap}
-.gc-board td{padding:12px 12px;border-bottom:1px solid var(--dsw-alias-border-l2);vertical-align:middle}
+/* 窄屏（<1100px）列会挤：让表格自己横向滚动，而不是撑破外层或压缩文字。 */
+.gc-board-scroll{overflow-x:auto;overscroll-behavior-x:contain}
+.gc-board table{width:100%;min-width:820px;border-collapse:collapse}
+.gc-board th{font-size:11.5px;font-weight:500;color:var(--dsw-alias-label-secondary);text-align:left;padding:8px 12px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l2);white-space:nowrap}
+.gc-board td{padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-l2);vertical-align:middle}
 .gc-board tr:last-child td{border-bottom:0}
 .gc-board tbody tr:hover td{background:var(--dsw-alias-interactive-bg-hover)}
 .gc-name{font-weight:500}
 .gc-gid{font-size:11px;color:var(--dsw-alias-label-tertiary);font-family:ui-monospace,monospace;margin-top:1px}
-.gc-verdict{font-size:11px;margin-top:2px;line-height:1.5}
+.gc-verdict{font-size:11.5px;margin-top:3px;line-height:1.5}
 .gc-verdict.good{color:var(--dsw-alias-state-success-primary)}
 .gc-verdict.weak{color:var(--dsw-alias-state-warn-primary)}
 .gc-verdict.bad{color:var(--dsw-alias-state-error-primary)}
-.gc-st{display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap}
+.gc-st{display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .gc-ok{color:var(--dsw-alias-state-success-primary)}
 .gc-warn{color:var(--dsw-alias-state-warn-primary)}
 .gc-dots{display:inline-flex;gap:2px;margin-right:3px}
-.gc-dots i{display:block;width:3px;height:9px;border-radius:1px;background:currentColor;opacity:.18}
-.gc-dots i.on{opacity:.85}
+.gc-dots span{display:block;width:3px;height:9px;border-radius:1px;background:currentColor;opacity:.18}
+.gc-dots span.on{opacity:.85}
 .gc-err{color:var(--dsw-alias-state-error-primary)}
 .gc-none{color:var(--dsw-alias-label-tertiary)}
 .gc-run{color:var(--dsw-alias-brand-primary)}
 .gc-todo{border:1px solid var(--dsw-alias-border-l2);border-radius:9px;overflow:hidden}
 .gc-todo .hd{padding:9px 12px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l2);font-size:12px;font-weight:500;display:flex;align-items:center;gap:7px}
-.gc-badge{font-size:11px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-state-warn-primary);color:#fff}
+.gc-badge{font-size:11px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-state-warn-primary);color:#fff;font-variant-numeric:tabular-nums}
 .gc-it{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-l2);align-items:flex-start}
 .gc-it:last-child{border-bottom:0}
 .gc-it .t{font-size:12.5px}
-.gc-it .d{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin-top:2px;white-space:pre-line}
+.gc-it .d{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:3px;line-height:1.55;white-space:pre-line}
 .gc-it .ic{flex:none;width:16px;text-align:center}
 .gc-it .go{margin-left:auto;align-self:center;flex:none}
 .gc-empty{padding:28px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px}
@@ -86,7 +94,7 @@ window.__ModuleLoader__.load({
 .gc-job .hd{padding:8px 12px;background:var(--dsw-alias-bg-layer-1);border-bottom:1px solid var(--dsw-alias-border-l2);font-size:12px;font-weight:500;display:flex;align-items:center;gap:7px}
 .gc-jobline{font-size:11.5px;font-family:ui-monospace,monospace;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gc-btn:disabled{opacity:.4;cursor:default}
-.gc-hint{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin-top:14px;line-height:1.7}
+.gc-hint{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:18px;line-height:1.7}
 .gc-chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--dsw-alias-border-l3);margin-right:4px;white-space:nowrap}
 .gc-chip.done{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}
 .gc-chip.active{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
@@ -259,6 +267,7 @@ window.__ModuleLoader__.load({
           ),
 
           h('div', { className: 'gc-board' },
+            h('div', { className: 'gc-board-scroll' },
             h('table', null,
               h('thead', null, h('tr', null,
                 h('th', { style: { width: '24%' } }, '游戏 / 值不值得上架'),
@@ -359,7 +368,7 @@ window.__ModuleLoader__.load({
                             // 光看 "5/8" 不知道算好算坏，配一条 8 格的进度条让程度可见。
                             // 已达标的格用当前色，未达标用极淡的底色。
                             h('span', { className: 'gc-dots', 'aria-hidden': 'true' },
-                              Array.from({ length: v.total }, (_, i) => h('i', {
+                              Array.from({ length: v.total }, (_, i) => h('span', {
                                 key: i,
                                 className: i < v.score ? 'on' : ''
                               }))
@@ -424,6 +433,7 @@ window.__ModuleLoader__.load({
                     );
                   })
               )
+            )
             )
           ),
 
