@@ -38,14 +38,19 @@ window.__ModuleLoader__.load({
 /* 全局兜底：面板内任何可聚焦元素都必须有可见焦点环。
    宿主样式会清掉 outline，不给个兜底键盘就没法用。 */
 .gc-root :focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
-.gc-top{height:46px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid var(--dsw-alias-border-l2)}
-.gc-top h1{font-size:14px;font-weight:600;margin:0}
+.gc-top{height:52px;flex:none;display:flex;align-items:center;gap:10px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-l2)}
+.gc-top h1{font-size:20px;font-weight:600;margin:0;letter-spacing:-.01em}
+.gc-count{font-size:13px;color:var(--dsw-alias-label-tertiary);margin-left:8px;
+  font-variant-numeric:tabular-nums}
+.gc-todo-pill{font-size:12px;padding:5px 12px;border-radius:999px;margin-right:10px;
+  background:var(--dsw-alias-state-warn-primary);color:#fff;font-variant-numeric:tabular-nums}
+.gc-btn-icon{padding:5px 10px;font-size:14px;line-height:1}
 /* 桌面应用用了隐藏式标题栏，红黄绿窗口按钮会盖住左上角内容。
    给这块留出空间，Web 端窗口按钮不在文档流里所以不影响。 */
 /* 桌面窗口的红黄绿按钮压在这块区域，Web 端没有。
    不做环境探测——探测不可靠，宁可让 Web 端多 78px 左边距，
    也不能让桌面端标题被窗口按钮盖住。 */
-.gc-top-safe{width:78px;flex:none}
+.gc-top-safe{display:none}
 .gc-sub{font-size:12px;color:var(--dsw-alias-label-tertiary)}
 .gc-grow{flex:1}
 .gc-btn{font:inherit;font-size:12px;padding:5px 11px;border-radius:7px;cursor:pointer;border:1px solid var(--dsw-alias-border-l3);background:transparent;color:inherit;transition:background-color .12s,border-color .12s,color .12s}
@@ -109,18 +114,19 @@ window.__ModuleLoader__.load({
 /* ══════════ 游戏画廊 ══════════
    卡片是页面主体：先看见游戏长什么样，再看它的体检报告。
    状态收成封面上的徽章，不占正文空间。 */
-.gc-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(292px,1fr));gap:20px;margin-bottom:28px}
+.gc-gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;margin-bottom:28px}
 .gc-card{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);
   border-radius:14px;overflow:hidden;display:flex;flex-direction:column;
   transition:border-color .16s,box-shadow .16s}
 .gc-card:hover{border-color:var(--dsw-alias-border-l3);box-shadow:0 4px 16px rgba(0,0,0,.06)}
 
 /* 封面：真实美术居中，四周留白，不放满整个卡片 */
-.gc-cover{position:relative;height:178px;display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(150deg,rgba(122,158,176,.16),rgba(46,84,104,.10))}
-.gc-cover.is-blocked{background:linear-gradient(150deg,rgba(180,52,42,.13),rgba(180,52,42,.05))}
-.gc-cover.is-weak{background:linear-gradient(150deg,rgba(200,150,60,.15),rgba(160,110,30,.05))}
-.gc-cover-img{max-height:146px;max-width:68%;object-fit:contain;
+.gc-cover{position:relative;aspect-ratio:2.28/1;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(150deg,var(--cov-a,#e8eef2),var(--cov-b,#d5e2ea))}
+/* 覆盖层：让主形象和背景融为一体，而不是贴上去 */
+.gc-cover::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse at 50% 108%,rgba(0,0,0,.10),transparent 62%)}
+.gc-cover-img{max-height:74%;max-width:72%;object-fit:contain;
   filter:drop-shadow(0 6px 14px rgba(0,0,0,.13))}
 .gc-cover-fallback{font-size:44px;font-weight:600;color:var(--dsw-alias-label-tertiary);opacity:.5}
 
@@ -135,12 +141,12 @@ window.__ModuleLoader__.load({
   gap:7px;background:rgba(255,255,255,.86);font-size:12px;color:var(--dsw-alias-brand-primary);
   padding:0 16px;text-align:center;line-height:1.5}
 
-.gc-card-body{padding:13px 15px 11px;flex:1}
-.gc-card-title{font-size:15px;font-weight:600;margin:0;line-height:1.35;
+.gc-card-body{padding:16px 18px 14px;flex:1}
+.gc-card-title{font-size:17px;font-weight:600;margin:0;line-height:1.3;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gc-card-sub{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin-top:3px}
+.gc-card-sub{font-size:12.5px;color:var(--dsw-alias-label-tertiary);margin-top:4px}
 /* 下一步：一句话说清最该处理的事，最多两行 */
-.gc-card-next{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:9px;
+.gc-card-next{font-size:12.5px;color:var(--dsw-alias-label-secondary);margin-top:12px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2);
   line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
   overflow:hidden}
 
@@ -313,13 +319,12 @@ window.__ModuleLoader__.load({
         h('div', { className: 'gc-top' },
           // 左侧留出桌面窗口的红黄绿按钮的位置，避免标题被压住
           h('div', { className: 'gc-top-safe' }),
-          h('h1', null, '工作室'),
-          h('span', { className: 'gc-sub' },
-            `${stats.total} 款游戏`,
-            stats.tasks > 0 ? ` · ${stats.tasks} 项待处理` : ' · 没有待处理'
-          ),
+          h('h1', null, '我的游戏'),
+          h('span', { className: 'gc-count' }, String(stats.total)),
           h('span', { className: 'gc-grow' }),
-          h('button', { className: 'gc-btn', onClick: load }, '刷新')
+          stats.tasks > 0 && h('span', { className: 'gc-todo-pill' },
+            `${stats.tasks} 项待处理`),
+          h('button', { className: 'gc-btn gc-btn-icon', onClick: load, title: '刷新', 'aria-label': '刷新' }, '⟳')
         ),
         h('div', { className: 'gc-scroll' },
           state.error && h('div', { className: 'gc-empty', style: { color: 'var(--dsw-alias-state-error-primary)' } }, state.error),
@@ -352,7 +357,10 @@ window.__ModuleLoader__.load({
                 else if (!a) nextText = '还没跑过自审';
 
                 return h('article', { className: 'gc-card', key: g.project },
-                  h('div', { className: `gc-cover ${hasBlock ? 'is-blocked' : (v && v.verdict === 'suggest-drop' ? 'is-weak' : '')}` },
+                  h('div', {
+                    className: 'gc-cover',
+                    style: (() => { const t = props.coverTone(g.project); return { '--cov-a': t.a, '--cov-b': t.b }; })()
+                  },
                     cover
                       ? h('img', {
                         className: 'gc-cover-img',
@@ -544,6 +552,17 @@ window.__ModuleLoader__.load({
         } catch (e) { return ''; }
       }
 
+      /**
+       * 每款游戏一个稳定的封面底色。
+       * 用项目名哈希取色相，同一款游戏每次打开的配色都一样。
+       * 饱和度压得很低——封面是衬托主形象的，不该抢戏。
+       */
+      const coverTone = (key) => {
+        let h = 0;
+        for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) % 360;
+        return { a: `hsl(${h} 34% 84%)`, b: `hsl(${(h + 26) % 360} 40% 72%)` };
+      };
+
       const readFile = async (sessionId, relPath) => {
         try {
           const sid = sessionId || currentSessionId(ctx);
@@ -601,7 +620,8 @@ window.__ModuleLoader__.load({
             readFile: (rel) => readFile(sessionId, rel),
             readGlobal,
             runBuild,
-            runCommand
+            runCommand,
+            coverTone
           })
         }, ConsolePanel);
       }), 'game-console: main panel');
