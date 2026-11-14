@@ -39,6 +39,35 @@
 **收集躲避类**（collector 模板）是这个流水线最熟的品类，一次成型的概率最高。
 其它品类（三消、塔防、跑酷、卡牌）能做，但要提醒：转换器的兼容性检查会更常拦人。
 
+## 第二层半：值不值得做（爆款基因）
+
+> 玩法定了之后问。**这一层决定要不要做，不是怎么做。**
+>
+> 规则来自 `rules/viral-dna-rules.md`。核心判断：爆火 = 获客摩擦≈0 × 多巴胺回路成立 × 传播系数>1，
+> 三个变量缺一个就爆不了。这里问的是能不能拿到这三个变量。
+
+**只问 brief 里填不出来、又必须由用户决定的三件事**，其余机器能判的就别问：
+
+| 该问的 | 落到 |
+|---|---|
+| 这游戏分享给朋友时，他是从哪来的？（能直接开玩/要下载/要注册） | `offline`，决定 OD-07 零摩擦 |
+| 有没有任何付费点？（内购/虚拟支付/解锁） | `iap`，有内购必须版号 |
+| 分享是玩法的一部分，还是角落里一个按钮？ | `share`，`VD-05` 分享即机制 |
+| 玩家失败时会觉得「差点就过了」还是「这游戏不公平」？ | `VD-04` 人工项，要用户确认 |
+| 玩完之后他会跟朋友说什么？ | `VD-06` 人工项，要用户确认 |
+| 现在为什么是这个题材？看到什么信号了？ | `emotion_theme` + `trend_evidence` |
+
+最后一条**不能跳过**。情绪主题会过期——谷子经济 2024 年已经 1688 亿、品牌都下场了，再进就是接盘。
+没有"势"的依据就不要立项，而不是做完再说。
+
+**问完立刻跑一次 Gate 1**，别等到写完代码：
+
+```bash
+node scripts/precheck.mjs --brief <游戏目录>/game.brief.json --channel <target>
+```
+
+`viral-dna score` 低于 6/8 要跟用户说清楚缺什么；缺 2 条以上**建议别做**（不阻断，但要明说）。
+
 ## 第三层：交付（决定验收标准）
 
 > 这次是想先看看效果，还是要能发给别人玩？
@@ -59,12 +88,25 @@
 ```bash
 node scripts/brief.mjs init --out <游戏目录>/game.brief.json \
   --title 月夜狐灯 --genre collect-and-dodge --target wechat \
-  --appid wx... --orientation landscape
+  --appid wx... --orientation landscape \
+  --emotion-theme 解压 --trend-evidence "微博焦虑词频三周上涨，摸鱼类搜索翻倍"
 node scripts/brief.mjs check --file <游戏目录>/game.brief.json
+node scripts/precheck.mjs --brief <游戏目录>/game.brief.json --channel wechat
 ```
 
 必填：`title`、`genre`、`target`、`acceptance.mustReachPhase`、`acceptance.minFps`。
 `channel.appid` 为空只是警告（只能跑模拟器，不能预览上传）。
+
+**爆款基因相关字段**（写进 brief，Gate 1 会读）：
+
+| 字段 | 说明 |
+|---|---|
+| `offline` | `true` = 单机免注册。没写会被判 VD-07 不过（除非台账里记着） |
+| `iap` | `true` = 有内购。个人主体拿不到版号，这一项是硬约束 |
+| `share` | 分享机制，如 `{"kind":"leaderboard"}`。空则 VD-05 不过 |
+| `pace` | 节奏档 `twitch` / `midcore` / `strategy`，留空则从 genre 推断 |
+| `emotion_theme` | 情绪主题（解压/职场发泄/治愈…）。会过期，所以只作输入 |
+| `trend_evidence` | 凭什么现在是这个题材的窗口期。空则 VD-08 不过 |
 
 ## 反例：什么情况下别问
 

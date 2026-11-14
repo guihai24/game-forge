@@ -56,6 +56,7 @@ function parseArgs(argv) {
     else if (a === '--min-fps') o.minFps = Number(argv[++i]) || 45;
     else if (a === '--boot-wait') o.bootWaitMs = Number(argv[++i]) || 8000;
     else if (a === '--keep-open') o.keepOpen = true;
+    else if (a === '--no-check') o.noCheck = true;
     else if (a === '-h' || a === '--help') o.help = true;
     else throw new Error(`未知参数: ${a}`);
   }
@@ -219,11 +220,57 @@ async function runAll(args) {
 }
 
 /* ---------- 主流程 ---------- */
+/* ---------- 构建前置自审 ---------- */
+
+/** 有合规 BLOCK 就拒绝构建；基因项只打印提示。
+ *
+ * 为什么放在 build 里而不是靠人记得跑 precheck：需求阶段的自审容易被跳过，
+ * 但"要构建了"是个绕不过去的动作。挂在这里，它就变成必经环节。
+ * --no-check 可以显式跳过（用于调试流水线本身）。
+ */
+async function precheckGate(game) {
+  const briefPath = path.join(game, 'game.brief.json');
+  if (!fs.existsSync(briefPath)) return;   // 不是标准游戏目录，交给后面的流程报错
+
+  let report = null;
+  let gate1 = null;
+  try {
+    const { makeReport, checkBrief } = await import('./precheck-lib.mjs');
+    const { scoreBrief } = await import('./viral-dna-lib.mjs');
+    const brief = JSON.parse(fs.readFileSync(briefPath, 'utf8'));
+    report = makeReport();
+    checkBrief(brief, brief.target === 'wechat' ? 'wechat' : 'taptap', report);
+    const st = (() => { try { return JSON.parse(fs.readFileSync(path.join(game, '.forge', 'state.json'), 'utf8')); } catch (e) { return {}; } })();
+    gate1 = scoreBrief(brief, { offline: st.offline === true, iap: st.iap === true });
+  } catch (e) {
+    // 自审自身出错不该挡构建——它是辅助，不是依赖
+    console.log(`  ⚠ 构建前置自审没跑起来：${e.message}`);
+    return;
+  }
+
+  const blocks = report.blocked;
+  if (blocks.length) {
+    console.error('\n✗ 构建前置自审未通过（合规红线）：');
+    for (const b of blocks) console.error(`    ✗ ${b.msg}`);
+    console.error('  这些问题不改，做出来也上不了架。用 --no-check 可强行跳过。\n');
+    process.exit(4);
+  }
+  if (gate1) {
+    console.log(`  · 基因 ${gate1.score}/${gate1.total}${gate1.verdict === 'suggest-drop' ? '（建议砍掉，但不阻断构建）' : ''}`);
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help || (!args.game && !args.all)) {
     console.log('用法:\n  node publish.mjs --target wechat|web --game <游戏目录> [--preview] [--strict] [--require-fps]\n  node publish.mjs --all [根目录] [--targets wechat,web] [--preview]');
     process.exit(args.help ? 0 : 1);
+  }
+
+  // 构建前置自审：合规有 BLOCK 就别浪费一次构建（改完还要重来）。
+  // 基因层不拦——只有 WARN，只提示。
+  if (!args.noCheck && args.game && !args.all) {
+    await precheckGate(path.resolve(args.game));
   }
 
   if (args.all) {

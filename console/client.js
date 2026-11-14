@@ -181,6 +181,25 @@ window.__ModuleLoader__.load({
         }
       }, [props.runBuild, load]);
 
+      /** 归档 / 恢复：不是构建任务，走通用的 /game-console 命令。 */
+      const callCommand = useCallback(async (line) => {
+        try {
+          if (!props.runCommand) throw new Error('命令通道不可用：请先在左侧打开一个会话');
+          const res = await props.runCommand(line);
+          if (!res || !res.ok) throw new Error((res && res.text) || '执行失败');
+          setState((s) => ({ ...s, error: null }));
+          await load();
+          return res;
+        } catch (error) {
+          setState((s) => ({ ...s, error: String((error && error.message) || error) }));
+          return null;
+        }
+      }, [props.runCommand, load]);
+
+      const archiveGame = useCallback(async (project, reason) => {
+        await callCommand(`/game-console archive ${JSON.stringify({ project, reason })}`);
+      }, [callCommand]);
+
       const stats = useMemo(() => {
         const games = Array.isArray(state.games) ? state.games : [];
         const live = games.filter((g) => Object.values(g.state.channels || {}).some(
@@ -263,7 +282,13 @@ window.__ModuleLoader__.load({
                           }, parts.join('　·　'));
                         })(),
                         g.state.probe
-                          ? h('div', { className: 'gc-gid', title: '产物实测（Gate 2）' }, `实测：${g.state.probe.summary}`)
+                          ? h('div', {
+                            className: 'gc-gid',
+                            style: g.state.probe.stale ? { color: 'var(--dsw-alias-state-warn-primary)' } : undefined,
+                            title: `实测于 ${String(g.state.probe.at || '').replace('T', ' ').slice(0, 16)}`
+                          }, g.state.probe.stale
+                            ? `实测已过期（构建后有改动）：${g.state.probe.summary}`
+                            : `实测：${g.state.probe.summary}`)
                           : null
                       ),
                       CHANNELS.map((c) => {
@@ -308,12 +333,16 @@ window.__ModuleLoader__.load({
                           if (!v) return h('span', { className: 'gc-st gc-none' }, '—');
                           const tone = v.verdict === 'suggest-drop' ? 'gc-warn' : 'gc-ok';
                           const tip = [
-                            `viral-dna ${v.score}/${v.total}`,
-                            ...v.failed.map((i) => `${i.needsHuman ? '?' : '⚠'} ${i.id} ${i.label}：${i.detail}`),
+                            `viral-dna ${v.score}/${v.total}${v.reconciled ? '（已并入产物实测）' : '（仅 brief 静态判定）'}`,
+                            ...v.failed.map((i) => `${i.needsHuman ? '?' : (i.unmeasured ? '·' : '⚠')} ${i.id} ${i.label}：${i.detail}`),
+                            ...(v.overridden || []).map((o) => `↑ ${o.id} ${o.label} 被 ${o.by} 实测修正`),
                             '',
                             v.summary
                           ].join('\n');
-                          return h('span', { className: `gc-st ${tone}`, title: tip }, `${v.score}/${v.total}`);
+                          return h('span', { className: `gc-st ${tone}`, title: tip },
+                            `${v.score}/${v.total}`,
+                            v.reconciled ? null : h('span', { style: { opacity: 0.55, fontSize: 10 } }, '静态')
+                          );
                         })()
                       ),
                       h('td', { style: { textAlign: 'right', whiteSpace: 'nowrap' } },
@@ -350,7 +379,17 @@ window.__ModuleLoader__.load({
                                 ? '已有任务在跑'
                                 : 'Gate 2：起浏览器实测分享/反馈延迟/单局时长/冷启动，不采信 brief 自述',
                               onClick: () => startBuild(g.project, 'web', 'probe')
-                            }, '实测')
+                            }, '实测'),
+                            h('button', {
+                              className: 'gc-btn sm',
+                              style: { marginLeft: 6 },
+                              disabled: anyBusy,
+                              title: '移到 _archive/，不再出现在看板上。不删文件，可恢复。',
+                              onClick: () => {
+                                if (typeof window !== 'undefined' && window.confirm && !window.confirm(`把「${g.state.title || g.project}」移到归档区？\n\n不删任何文件，之后可以从 _archive/ 手动移回。`)) return;
+                                archiveGame(g.project, g.state.viral && g.state.viral.verdict === 'suggest-drop' ? '基因砍线' : '');
+                              }
+                            }, '归档')
                           )
                       )
                     );
@@ -509,14 +548,14 @@ window.__ModuleLoader__.load({
         }
       };
 
-      const runBuild = async (project, target, action) => {
+      /** 往会话发一条 /game-console 命令，返回 { ok, text }。 */
+      const execute = async (line) => {
         try {
           const sid = currentSessionId(ctx);
-          if (!sid) return { ok: false, text: '没有打开中的会话：先在左侧打开一个会话，构建需要它来接收输出' };
-          const line = `/game-console run ${JSON.stringify({ project, target, action: action || 'build' })}`;
+          if (!sid) return { ok: false, text: '没有打开中的会话：先在左侧打开一个会话' };
           const result = await ctx.remote.commands.execute(sid, line, []);
           if (!result || !result.ok) {
-            return { ok: false, text: (result && result.error && result.error.message) || '构建启动失败' };
+            return { ok: false, text: (result && result.error && result.error.message) || '命令执行失败' };
           }
           const value = result.value && result.value.result !== undefined ? result.value.result : result.value;
           if (value === undefined) return { ok: false, text: '命令在当前会话不可用' };
@@ -525,6 +564,12 @@ window.__ModuleLoader__.load({
           return { ok: false, text: error instanceof Error ? error.message : String(error) };
         }
       };
+
+      const runBuild = (project, target, action) =>
+        execute(`/game-console run ${JSON.stringify({ project, target, action: action || 'build' })}`);
+
+      /** 任意 /game-console 子命令（归档、恢复等）。 */
+      const runCommand = (line) => execute(line);
 
       function currentSessionId(c) {
         try {
@@ -547,7 +592,8 @@ window.__ModuleLoader__.load({
             consoleSessionId: typeof sessionId === 'string' ? sessionId : '',
             readFile: (rel) => readFile(sessionId, rel),
             readGlobal,
-            runBuild
+            runBuild,
+            runCommand
           })
         }, ConsolePanel);
       }), 'game-console: main panel');

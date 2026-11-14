@@ -21,7 +21,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 
 import { precheckAll } from '../engine/scripts/precheck-lib.mjs';
-import { scoreBrief, verdictSummary } from '../engine/scripts/viral-dna-lib.mjs';
+import { scoreBrief, verdictSummary, reconcileGates } from '../engine/scripts/viral-dna-lib.mjs';
 
 export const name = '@guihai24/dsh-game-console';
 export const inject = ['workingDirectory', 'sessions'];
@@ -29,7 +29,7 @@ export const inject = ['workingDirectory', 'sessions'];
 /* ---------- 文件读取 ---------- */
 const SKIP = new Set([
   'node_modules', '.git', 'dist', 'targets', '.pipeline', '.forge',
-  'export', 'assets', '.studio', 'console', 'engine', '.github'
+  'export', 'assets', '.studio', 'console', 'engine', '.github', '_archive'
 ]);
 
 function readJson(file) {
@@ -177,17 +177,99 @@ function collectTasks(games) {
         createdAt: new Date().toISOString()
       });
     }
+
+    // 基因层结论：每个游戏一条决策待办，不是每项一条。
+    // 砍线是"这个项目还要不要做"的一次判断，拆成 8 条只会淹没真正要做的事。
+    const v = g.state.viral;
+    if (v && v.verdict === 'suggest-drop') {
+      const missing = v.failed.filter((i) => !i.needsHuman).map((i) => i.label);
+      out.push({
+        id: `${g.project}:viral:drop`,
+        kind: 'viral-drop',
+        title: `${g.state.title} · 基因 ${v.score}/${v.total}，建议砍掉`,
+        detail: `未过：${missing.join('、') || '—'}。砍线只算能机器判的项，人工项另需确认。规则见 viral-dna-rules.md`,
+        project: g.project,
+        title_game: g.state.title,
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    // Gate 2 实测未达：同样每个游戏一条，列出未达项。
+    const p = g.state.probe;
+    if (p && p.ok === false && p.items) {
+      const bad = p.items.filter((i) => i.ok === false);
+      if (bad.length) {
+        out.push({
+          id: `${g.project}:probe:fail`,
+          kind: 'probe-fail',
+          title: `${g.state.title} · 产物实测 ${bad.length} 项未达`,
+          detail: `${bad.map((i) => `${i.label}：${i.detail}`).join('；')}。针对产物，不看 brief 怎么说`,
+          project: g.project,
+          title_game: g.state.title,
+          createdAt: new Date().toISOString()
+        });
+      }
+    }
   }
-  // 自审阻断 > 有截止时间 > 其余按创建时间倒序
+  // 自审阻断 > 基因砍线 > 产物实测 > 有截止时间 > 其余
+  const rank = (k) => ({ 'audit-block': 0, 'viral-drop': 1, 'probe-fail': 2 }[k] ?? 3);
   return out.sort((a, b) => {
-    const pa = a.kind === 'audit-block' ? 0 : 1;
-    const pb = b.kind === 'audit-block' ? 0 : 1;
+    const pa = rank(a.kind);
+    const pb = rank(b.kind);
     if (pa !== pb) return pa - pb;
     if (a.deadline && b.deadline) return String(a.deadline).localeCompare(String(b.deadline));
     if (a.deadline) return -1;
     if (b.deadline) return 1;
     return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
   });
+}
+
+/* ---------- 归档 ---------- *
+ *
+ * "跑不起来就砍掉"是产品定位的一部分，但砍掉不等于删掉——素材、brief、
+ * 踩过的坑都还有价值。所以归档 = 移到 <root>/_archive/ 下，扫描不再看它。
+ * 可逆，不产生不可恢复的操作。
+ */
+const ARCHIVE_DIR = '_archive';
+
+function archiveGame(root, payload) {
+  const project = String(payload.project || '');
+  if (!project) throw new Error('archive 需要 project');
+  const src = path.resolve(root, project);
+  const rootAbs = path.resolve(root);
+  if (!src.startsWith(rootAbs)) throw new Error('项目路径越界');
+  if (!fs.existsSync(path.join(src, 'game.brief.json'))) throw new Error(`${project} 不是游戏目录`);
+  if (path.basename(path.dirname(src)) === ARCHIVE_DIR) throw new Error('已经在归档区里');
+
+  const dest = path.join(rootAbs, ARCHIVE_DIR, path.basename(src));
+  if (fs.existsSync(dest)) throw new Error(`${ARCHIVE_DIR}/${path.basename(src)} 已存在，先处理冲突`);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.renameSync(src, dest);
+
+  // 记一笔归档原因，将来回看时知道为什么砍的
+  const st = loadState(dest);
+  st.archivedAt = new Date().toISOString();
+  st.archiveReason = String(payload.reason || '');
+  writeJson(statePath(dest), st);
+
+  return { project, archivedTo: path.join(ARCHIVE_DIR, path.basename(src)), reason: st.archiveReason };
+}
+
+function restoreGame(root, payload) {
+  const project = String(payload.project || '');
+  const src = path.resolve(root, ARCHIVE_DIR, project);
+  const rootAbs = path.resolve(root);
+  if (!src.startsWith(rootAbs)) throw new Error('项目路径越界');
+  if (!fs.existsSync(path.join(src, 'game.brief.json'))) throw new Error(`${ARCHIVE_DIR}/${project} 不是游戏目录`);
+  const dest = path.join(rootAbs, path.basename(src));
+  if (fs.existsSync(dest)) throw new Error(`${path.basename(src)} 已存在，不能恢复`);
+
+  const st = loadState(src);
+  delete st.archivedAt;
+  delete st.archiveReason;
+  writeJson(statePath(src), st);
+  fs.renameSync(src, dest);
+  return { restored: path.basename(src) };
 }
 
 function scanAll(root) {
@@ -210,12 +292,28 @@ function scanAll(root) {
     } catch (e) { /* 没打过 */ }
     const audit = audits[dir] || null;
 
-    // 基因打分：Gate 1 是纯静态（读 brief），每次扫描都算，代价可忽略。
+    // 基因打分：Gate 1 是纯静态（读 brief + 台账已知事实），每次扫描都算，代价可忽略。
     // Gate 2 要起浏览器实测，不能放进 2 秒一次的扫描——结果由 probe 动作写进
     // <游戏目录>/.forge/viral.json，这里只读缓存。
     let gate1 = null;
-    try { gate1 = scoreBrief(readJson(path.join(dir, 'game.brief.json')) || {}); } catch (e) { gate1 = null; }
+    try {
+      gate1 = scoreBrief(readJson(path.join(dir, 'game.brief.json')) || {}, {
+        offline: state.offline === true,
+        iap: state.iap === true
+      });
+      // 有实测缓存时，用实测结论修正静态判定（实测优先）。
+      const cached = readJson(path.join(dir, '.forge', 'viral.json'));
+      if (cached && cached.items) gate1 = reconcileGates(gate1, cached.items);
+    } catch (e) { gate1 = null; }
     const probe = readJson(path.join(dir, '.forge', 'viral.json'));
+
+    // 实测过期判定：构建产物比实测结果新，说明代码改过而没重测。
+    // 实测基于旧产物，结论不可信——必须显式标出来，不能装作还是对的。
+    let stale = false;
+    if (probe && probe.at) {
+      const builtAt = (state.built && state.built.at) || null;
+      if (builtAt && String(builtAt) > String(probe.at)) stale = true;
+    }
 
     return {
       project: path.relative(root, dir) || '.',
@@ -237,10 +335,26 @@ function scanAll(root) {
           total: gate1.total,
           verdict: gate1.verdict,
           note: gate1.note,
-          failed: gate1.failed.map((i) => ({ id: i.id, label: i.label, detail: i.detail, needsHuman: Boolean(i.needsHuman) })),
+          // 有实测修正时，分数和"从 brief 静态推测"不是一回事，界面要说清楚
+          reconciled: Boolean(gate1.reconciled),
+          overridden: (gate1.overridden || []).map((i) => ({ id: i.id, label: i.label, by: i.overriddenBy, detail: i.detail })),
+          failed: gate1.failed.map((i) => ({
+            id: i.id,
+            label: i.label,
+            detail: i.detail,
+            needsHuman: Boolean(i.needsHuman),
+            unmeasured: Boolean(i.unmeasured)
+          })),
           summary: verdictSummary(gate1, probe && probe.items)
         } : null,
-        probe: probe ? { at: probe.at || null, ok: probe.ok, summary: probe.summary, failed: probe.failed } : null,
+        probe: probe ? {
+          at: probe.at || null,
+          ok: probe.ok,
+          summary: probe.summary,
+          failed: probe.failed,
+          unmeasured: probe.unmeasured || 0,
+          stale
+        } : null,
         updatedAt: state.updatedAt || null
       }
     };
@@ -635,6 +749,16 @@ export function apply(ctx, config = {}) {
           }
           if (action === 'set-stage') {
             const out = setStage(root, payload);
+            publishSnapshot(root);
+            return { kind: 'success', text: JSON.stringify(out) };
+          }
+          if (action === 'archive') {
+            const out = archiveGame(root, payload);
+            publishSnapshot(root);
+            return { kind: 'success', text: JSON.stringify(out) };
+          }
+          if (action === 'restore') {
+            const out = restoreGame(root, payload);
             publishSnapshot(root);
             return { kind: 'success', text: JSON.stringify(out) };
           }

@@ -23,7 +23,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeReport, checkBrief, checkSubmit, readJson } from './precheck-lib.mjs';
-import { scoreBrief } from './viral-dna-lib.mjs';
+import { scoreBrief, reconcileGates } from './viral-dna-lib.mjs';
+
+/** 从同目录的 .forge/state.json 读已知事实，供 Gate 1 复用。
+ *  brief 漏填的字段（offline / iap）如果台账里已经确认过，就不该判失败。 */
+function ledgerFacts(briefPath) {
+  try {
+    const dir = path.dirname(path.resolve(briefPath));
+    const st = readJson(path.join(dir, '.forge', 'state.json'));
+    if (!st) return {};
+    return { offline: st.offline === true, iap: st.iap === true };
+  } catch (e) { return {}; }
+}
 import { runProbe } from './viral-probe.mjs';
 
 function parseArgs(argv) {
@@ -109,7 +120,7 @@ async function main() {
     const brief = readJson(args.brief);
     if (!brief) { console.error(`✗ 读不到 ${args.brief}`); return 1; }
     checkBrief(brief, args.channel, report);
-    const gate1 = scoreBrief(brief);
+    const gate1 = scoreBrief(brief, ledgerFacts(args.brief));
 
     if (args.json) {
       console.log(JSON.stringify({
@@ -138,7 +149,7 @@ async function main() {
     }
     const brief = readJson(briefPath) || {};
     const self = checkSubmit(dir, args.channel, report);
-    const gate1 = scoreBrief(brief);
+    let gate1 = scoreBrief(brief, ledgerFacts(briefPath));
 
     let gate2 = null;
     let probed = false;
@@ -147,7 +158,7 @@ async function main() {
         gate2 = await runProbe(dir, { seconds: 12 });
         probed = gate2.probed;
       } catch (e) {
-        gate2 = { items: [], probed: false, ok: false, failed: 0, summary: `实测没跑起来：${e.message}` };
+        gate2 = { items: [], probed: false, ok: false, failed: 0, unmeasured: 0, summary: `实测没跑起来：${e.message}` };
       }
     }
 
@@ -163,12 +174,21 @@ async function main() {
         hint: '换皮是渠道封号的第一原因，见 channel-rules.md 第二节',
         reused: true
       }, ...gate2.items];
-      const g2fail = gate2.items.filter((i) => !i.ok && i.level !== 'INFO');
+      const judged = gate2.items.filter((i) => i.level !== 'INFO');
+      const g2fail = judged.filter((i) => i.ok === false);
+      const g2un = judged.filter((i) => i.ok === null);
       gate2.failed = g2fail.length;
+      gate2.unmeasured = g2un.length;
       gate2.ok = g2fail.length === 0;
-      gate2.summary = g2fail.length === 0
-        ? '产物实测通过：去重、分享、反馈、时长、冷启动都达标'
-        : `产物实测 ${g2fail.length} 项未达：${g2fail.map((i) => i.label).join('、')}`;
+      gate2.summary = [
+        g2fail.length === 0
+          ? `产物实测无未达${g2un.length ? `（${g2un.length} 项未测到）` : ''}`
+          : `产物实测 ${g2fail.length} 项未达：${g2fail.map((i) => i.label).join('、')}`,
+        g2fail.length && g2un.length ? `；另有 ${g2un.length} 项未测到` : ''
+      ].join('');
+
+      // 实测优先：Gate 2 测到的，覆盖 Gate 1 从 brief 文字推断的结论。
+      gate1 = reconcileGates(gate1, gate2.items);
     }
 
     if (args.json) {
@@ -178,7 +198,8 @@ async function main() {
         codeHash: self.codeHash,
         compliance: { ok: !report.blocked.length, items: report.items },
         viralDna: gate1,
-        probe: gate2
+        // at 给面板判断"实测是否过期"用（构建时间晚于实测时间就过期）
+        probe: gate2 ? { ...gate2, at: new Date().toISOString() } : null
       }, null, 2));
     } else {
       console.log(`\n自审：提交前 ${self.title}${args.channel ? ` · ${args.channel}` : ''}`);

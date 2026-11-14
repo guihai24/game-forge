@@ -19,8 +19,17 @@ const TEMPLATE = {
   title: '',
   genre: '',
   target: 'wechat',
-  // 「势」的输入层：情绪主题会过期，所以不硬编码进规则，只作为每次立项的输入。
-  // 见 references/rules/viral-dna-rules.md §四。
+  // ── 爆款基因层（Gate 1 会读）──────────────────────────────
+  // 这些字段以前靠 agent 手改 JSON 补，漏填就让 Gate 1 误判。
+  // offline / iap 决定"零摩擦"和"有没有内购"；share 决定分享是否内嵌；
+  // pace 是节奏档，留空则从 genre 推断；
+  // emotion_theme + trend_evidence 是"势"的输入——情绪主题会过期，
+  // 所以不硬编码进规则，只作为每次立项的输入。
+  // 见 references/rules/viral-dna-rules.md。
+  offline: true,
+  iap: false,
+  share: null,
+  pace: '',
   emotion_theme: '',
   trend_evidence: '',
   rules: {},
@@ -50,6 +59,10 @@ function parseArgs(argv) {
     else if (a === '--orientation') o.orientation = argv[++i];
     else if (a === '--emotion-theme') o.emotionTheme = argv[++i];
     else if (a === '--trend-evidence') o.trendEvidence = argv[++i];
+    else if (a === '--pace') o.pace = argv[++i];
+    else if (a === '--online') o.offline = false;
+    else if (a === '--iap') o.iap = true;
+    else if (a === '--share') o.share = argv[++i];
     else if (a === '--notes') o.notes = argv[++i];
     else if (a === '-h' || a === '--help') o.help = true;
   }
@@ -60,6 +73,7 @@ function usage() {
   console.log(`用法:
   node brief.mjs init  --out <路径> [--title T] [--genre G] [--target wechat|web] [--appid ID] [--orientation landscape|portrait]
                        [--emotion-theme <情绪主题>] [--trend-evidence <势的依据>]
+                       [--pace twitch|midcore|strategy] [--online] [--iap] [--share leaderboard]
   node brief.mjs check --file <路径>`);
 }
 
@@ -81,6 +95,10 @@ function init(args) {
   if (args.appid) brief.channel.appid = args.appid;
   if (args.emotionTheme) brief.emotion_theme = args.emotionTheme;
   if (args.trendEvidence) brief.trend_evidence = args.trendEvidence;
+  if (args.pace) brief.pace = args.pace;
+  if (args.offline === false) brief.offline = false;
+  if (args.iap) brief.iap = true;
+  if (args.share) brief.share = { kind: args.share };
   if (args.notes) brief.notes = args.notes;
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(brief, null, 2) + '\n', 'utf8');
@@ -113,6 +131,14 @@ function validate(brief) {
       errors.push('channel.orientation 必须是 landscape 或 portrait');
     }
   }
+
+  // 爆款基因字段：缺了不报错（历史 brief 没有这些字段），但要提醒。
+  // 它们直接影响 Gate 1 的打分，缺一项就少一分。
+  if (brief.offline === undefined) warnings.push('offline 未填——Gate 1 的 VD-07（零摩擦）会判不过');
+  if (brief.iap === undefined) warnings.push('iap 未填——有内购却没标，上架时会被版号要求卡住');
+  if (!brief.share) warnings.push('share 未填——Gate 1 的 VD-05（分享即机制）会判不过');
+  if (!brief.emotion_theme) warnings.push('emotion_theme 未填——情绪主题是立项输入，不是可选项');
+  if (!String(brief.trend_evidence || '').trim()) warnings.push('trend_evidence 未填——说不出"凭什么现在是这个题材的窗口期"，Gate 1 的 VD-08 会判不过');
 
   return { errors, warnings };
 }
