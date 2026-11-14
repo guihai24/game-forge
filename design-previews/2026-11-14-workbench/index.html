@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>游戏工作室看板 · 四个方向</title>
+<style>
+  :root{
+    --shell-bg:#f4f4f5; --shell-card:#fff; --shell-line:#e4e4e7;
+    --shell-text:#18181b; --shell-dim:#71717a; --shell-accent:#18181b;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--shell-bg); color:var(--shell-text);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:14px; line-height:1.6;
+  }
+
+  /* ── 中性外壳，不和方向抢戏 ── */
+  .bar{
+    position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:14px;
+    padding:12px 24px; background:rgba(244,244,245,.92); backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--shell-line);
+  }
+  .bar h1{font-size:14px;font-weight:600;margin:0;letter-spacing:0}
+  .bar .note{font-size:12px;color:var(--shell-dim)}
+  .bar .status{margin-left:auto;font-size:12px;color:var(--shell-dim);display:flex;align-items:center;gap:6px}
+  .dot{width:6px;height:6px;border-radius:50%;background:#d4d4d8}
+  .dot.ok{background:#16a34a}
+
+  .wrap{max-width:1560px;margin:0 auto;padding:22px 24px 64px}
+
+  .dials{display:flex;gap:26px;flex-wrap:wrap;padding:14px 18px;margin-bottom:20px;
+    background:var(--shell-card);border:1px solid var(--shell-line);border-radius:12px}
+  .dial{display:flex;align-items:center;gap:10px;font-size:12.5px}
+  .dial label{color:var(--shell-dim);white-space:nowrap}
+  .dial input[type=range]{width:132px;accent-color:var(--shell-accent)}
+  .dial output{font-variant-numeric:tabular-nums;font-weight:600;min-width:18px}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+
+  .card{
+    background:var(--shell-card); border:1px solid var(--shell-line); border-radius:14px;
+    overflow:hidden; display:flex; flex-direction:column;
+    transition:border-color .18s, box-shadow .18s;
+  }
+  .card.picked{border-color:var(--shell-accent);box-shadow:0 0 0 1px var(--shell-accent)}
+  .card-head{padding:14px 18px 0;display:flex;align-items:baseline;gap:10px}
+  .card-head .id{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+  .card-head .nm{font-size:14px;font-weight:600}
+  .card-head .tag{margin-left:auto;font-size:11px;padding:2px 8px;border-radius:999px;
+    border:1px solid var(--shell-line);color:var(--shell-dim);white-space:nowrap}
+  .card-head .tag.rec{border-color:#16a34a;color:#16a34a}
+
+  /* mockup 舞台：固定比例，内部等比缩放 */
+  .stage{position:relative;width:100%;aspect-ratio:16/10;margin:12px 0 0;overflow:hidden;
+    background:#fafafa;border-top:1px solid var(--shell-line);border-bottom:1px solid var(--shell-line)}
+  .stage-inner{position:absolute;top:0;left:0;width:1280px;height:800px;
+    transform-origin:top left}
+
+  .meta{padding:14px 18px 16px;display:flex;flex-direction:column;gap:10px;flex:1}
+  .meta .line{font-size:12.5px;color:var(--shell-dim);line-height:1.65}
+  .meta .line b{color:var(--shell-text);font-weight:600}
+  .pick{
+    margin-top:auto;width:100%;padding:11px 16px;font:inherit;font-size:13.5px;font-weight:600;
+    border:1px solid var(--shell-accent);border-radius:9px;background:var(--shell-accent);
+    color:#fff;cursor:pointer;transition:opacity .15s;
+  }
+  .pick:hover{opacity:.86}
+  .pick:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+
+  /* ── 确认弹层 ── */
+  .modal{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;
+    background:rgba(24,24,27,.42);padding:20px}
+  .modal.on{display:flex}
+  .modal .box{background:#fff;border-radius:14px;padding:24px;width:min(460px,100%);
+    box-shadow:0 22px 60px rgba(0,0,0,.24)}
+  .modal h2{margin:0 0 4px;font-size:16px}
+  .modal .sub{font-size:12.5px;color:var(--shell-dim);margin-bottom:16px}
+  .modal .kv{font-size:12.5px;color:var(--shell-dim);margin-bottom:14px;
+    background:#fafafa;border-radius:8px;padding:10px 12px;font-variant-numeric:tabular-nums}
+  .modal textarea{width:100%;min-height:74px;padding:10px 12px;font:inherit;font-size:13px;
+    border:1px solid var(--shell-line);border-radius:8px;resize:vertical;color:var(--shell-text)}
+  .modal textarea:focus-visible{outline:2px solid #2563eb;outline-offset:1px;border-color:#2563eb}
+  .modal .acts{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+  .modal button{font:inherit;font-size:13px;padding:9px 16px;border-radius:8px;cursor:pointer;
+    border:1px solid var(--shell-line);background:#fff;color:var(--shell-text)}
+  .modal button.go{background:var(--shell-accent);border-color:var(--shell-accent);color:#fff;font-weight:600}
+  .modal button:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+
+  .toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,14px);z-index:120;
+    background:#18181b;color:#fff;font-size:13px;padding:10px 18px;border-radius:999px;
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s}
+  .toast.on{opacity:1;transform:translate(-50%,0)}
+
+  @media (max-width:940px){
+    .grid{grid-template-columns:1fr}
+    .dials{gap:16px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1>游戏工作室看板 · 四个方向</h1>
+  <span class="note">方向样机，不是最终界面 · 按 1–4 快速选择</span>
+  <span class="status"><span class="dot" id="dot"></span><span id="statusText">未回传</span></span>
+</div>
+
+<div class="wrap">
+  <div class="dials">
+    <div class="dial"><label>视觉冒险度</label><input type="range" id="dV" min="1" max="10" value="6"><output id="oV">6</output></div>
+    <div class="dial"><label>动效强度</label><input type="range" id="dM" min="1" max="10" value="4"><output id="oM">4</output></div>
+    <div class="dial"><label>信息密度</label><input type="range" id="dD" min="1" max="10" value="5"><output id="oD">5</output></div>
+  </div>
+
+  <div class="grid">
+
+    <!-- ══════ A · 画廊卡册 ══════ -->
+    <article class="card" data-dir="A" data-name="画廊卡册">
+      <div class="card-head">
+        <span class="id">A</span><span class="nm">画廊卡册</span>
+        <span class="tag rec">推荐</span>
+      </div>
+      <div class="stage"><div class="stage-inner scale">
+        <div class="sa-a">
+          <header class="a-head">
+            <div class="a-title">我的游戏<span>2</span></div>
+            <div class="a-actions"><span class="a-pill">+ 新游戏</span><span class="a-ico">⟳</span></div>
+          </header>
+          <div class="a-cards">
+            <div class="a-card">
+              <div class="a-cover" style="background:linear-gradient(140deg,#7fb4c9,#4a7f95 60%,#2f5566)">
+                <svg viewBox="0 0 200 140" class="a-cover-art">
+                  <ellipse cx="100" cy="118" rx="72" ry="14" fill="rgba(0,0,0,.16)"/>
+                  <ellipse cx="100" cy="96" rx="40" ry="28" fill="#c98a5e"/>
+                  <circle cx="100" cy="66" r="27" fill="#d69b6e"/>
+                  <ellipse cx="89" cy="62" rx="5" ry="6" fill="#2b1d14"/>
+                  <ellipse cx="111" cy="62" rx="5" ry="6" fill="#2b1d14"/>
+                  <ellipse cx="100" cy="74" rx="6" ry="4" fill="#8c5a3c"/>
+                  <circle cx="78" cy="72" r="6" fill="#e8b48c" opacity=".7"/>
+                  <circle cx="122" cy="72" r="6" fill="#e8b48c" opacity=".7"/>
+                </svg>
+                <span class="a-badge bad">需要你处理</span>
+              </div>
+              <div class="a-body">
+                <div class="a-name">晨曦水獭</div>
+                <div class="a-desc">60 秒收集躲避 · 单机</div>
+                <div class="a-health">
+                  <span class="a-h bad">合规 阻断</span>
+                  <span class="a-h warn">基因 5/8</span>
+                </div>
+                <div class="a-next">和「月夜狐灯」代码完全相同，先改差异</div>
+              </div>
+            </div>
+            <div class="a-card">
+              <div class="a-cover" style="background:linear-gradient(140deg,#4a4363,#2e2a44 60%,#1d1a2e)">
+                <svg viewBox="0 0 200 140" class="a-cover-art">
+                  <ellipse cx="100" cy="118" rx="70" ry="13" fill="rgba(0,0,0,.28)"/>
+                  <ellipse cx="100" cy="98" rx="38" ry="26" fill="#b8763f"/>
+                  <circle cx="100" cy="68" r="26" fill="#cf8a4f"/>
+                  <path d="M76 54 L68 30 L90 48 Z" fill="#b8763f"/>
+                  <path d="M124 54 L132 30 L110 48 Z" fill="#b8763f"/>
+                  <ellipse cx="90" cy="64" rx="4.5" ry="5.5" fill="#20140b"/>
+                  <ellipse cx="110" cy="64" rx="4.5" ry="5.5" fill="#20140b"/>
+                  <circle cx="100" cy="98" r="9" fill="#f0b45c" opacity=".92"/>
+                  <circle cx="100" cy="98" r="17" fill="#f0b45c" opacity=".18"/>
+                </svg>
+                <span class="a-badge warn">基因偏弱</span>
+              </div>
+              <div class="a-body">
+                <div class="a-name">月夜狐灯</div>
+                <div class="a-desc">60 秒收集躲避 · 单机</div>
+                <div class="a-health">
+                  <span class="a-h bad">合规 阻断</span>
+                  <span class="a-h warn">基因 5/8</span>
+                </div>
+                <div class="a-next">品类当前无窗口期，建议归档</div>
+              </div>
+            </div>
+          </div>
+          <div class="a-todo">
+            <div class="a-todo-h">待你处理 <b>5</b></div>
+            <div class="a-todo-i"><i></i>月夜狐灯 · 与晨曦水獭代码完全相同</div>
+            <div class="a-todo-i"><i></i>晨曦水獭 · 微信上传缺密钥</div>
+          </div>
+        </div>
+      </div></div>
+      <div class="meta">
+        <div class="line"><b>气质</b> 像逛一间摆着成品的展室：先看见游戏长什么样，再看它的体检报告。</div>
+        <div class="line"><b>关键决定</b> 封面用游戏真实美术渲染，不是占位色块；状态收成两枚小徽章贴在封面上。</div>
+        <div class="line"><b>适合</b> 游戏数量少、需要快速判断「哪款值得继续做」。</div>
+        <button class="pick qmdp-pick-button" data-dir="A">选择 A · 画廊卡册</button>
+      </div>
+    </article>
+
+    <!-- ══════ B · 编辑式日报 ══════ -->
+    <article class="card" data-dir="B" data-name="编辑式日报">
+      <div class="card-head">
+        <span class="id">B</span><span class="nm">编辑式日报</span>
+        <span class="tag">高密度</span>
+      </div>
+      <div class="stage"><div class="stage-inner scale">
+        <div class="sb-b">
+          <div class="b-mast">
+            <div class="b-mast-l">
+              <div class="b-kicker">GAME STUDIO · 2026 年 11 月 14 日</div>
+              <div class="b-h">今天只有一件事<br>需要你决定</div>
+            </div>
+            <div class="b-mast-r">
+              <div class="b-num">5</div>
+              <div class="b-num-l">项待处理</div>
+            </div>
+          </div>
+          <div class="b-lead">
+            <div class="b-lead-t">两款游戏的代码完全相同，都会被渠道拒</div>
+            <div class="b-lead-d">晨曦水獭与月夜狐灯的 game.js 字节一致、5 个素材哈希相同。TapTap 1.4.1 明确不收录内容相同的游戏。改玩法差异，或只上其中一款。</div>
+            <div class="b-lead-a">查看差异对比 →</div>
+          </div>
+          <div class="b-rows">
+            <div class="b-row">
+              <div class="b-row-n">晨曦水獭</div>
+              <div class="b-row-c bad">阻断</div>
+              <div class="b-row-s">5/8</div>
+              <div class="b-row-x">代码同月夜狐灯</div>
+            </div>
+            <div class="b-row">
+              <div class="b-row-n">月夜狐灯</div>
+              <div class="b-row-c bad">阻断</div>
+              <div class="b-row-s">5/8</div>
+              <div class="b-row-x">品类无窗口期</div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+      <div class="meta">
+        <div class="line"><b>气质</b> 像一份印刷的日报：大字标题说结论，小字铺细节，读完就知道该干什么。</div>
+        <div class="line"><b>关键决定</b> 把「最该处理的一件事」做成头版，其余降为榜单条目。</div>
+        <div class="line"><b>适合</b> 每天打开一次、希望 10 秒内知道今天要做什么。</div>
+        <button class="pick qmdp-pick-button" data-dir="B">选择 B · 编辑式日报</button>
+      </div>
+    </article>
+
+    <!-- ══════ C · 流程轨道 ══════ -->
+    <article class="card" data-dir="C" data-name="流程轨道">
+      <div class="card-head">
+        <span class="id">C</span><span class="nm">流程轨道</span>
+        <span class="tag">过程可见</span>
+      </div>
+      <div class="stage"><div class="stage-inner scale">
+        <div class="sc-c">
+          <div class="c-top">
+            <div class="c-h">工作室</div>
+            <div class="c-legend"><span class="c-lg done"></span>已过 <span class="c-lg cur"></span>进行 <span class="c-lg blk"></span>卡住</div>
+          </div>
+          <div class="c-lane">
+            <div class="c-lane-h">
+              <span class="c-lane-n">晨曦水獭</span>
+              <span class="c-lane-s">卡在上传开发版</span>
+            </div>
+            <div class="c-track">
+              <div class="c-step done"><span></span><em>构建</em></div>
+              <div class="c-step done"><span></span><em>试玩</em></div>
+              <div class="c-step blk"><span>!</span><em>上传</em></div>
+              <div class="c-step"><span></span><em>备案</em></div>
+              <div class="c-step"><span></span><em>审核</em></div>
+              <div class="c-step"><span></span><em>上线</em></div>
+              <div class="c-bar"><div class="c-fill" style="width:36%"></div></div>
+            </div>
+            <div class="c-why">后台报 -10008 invalid ip，缺代码上传密钥 + 出口 IP 白名单</div>
+          </div>
+          <div class="c-lane">
+            <div class="c-lane-h">
+              <span class="c-lane-n">月夜狐灯</span>
+              <span class="c-lane-s">未开始</span>
+            </div>
+            <div class="c-track">
+              <div class="c-step done"><span></span><em>构建</em></div>
+              <div class="c-step"><span></span><em>试玩</em></div>
+              <div class="c-step"><span></span><em>上传</em></div>
+              <div class="c-step"><span></span><em>备案</em></div>
+              <div class="c-step"><span></span><em>审核</em></div>
+              <div class="c-step"><span></span><em>上线</em></div>
+              <div class="c-bar"><div class="c-fill" style="width:16%"></div></div>
+            </div>
+            <div class="c-why">已打包 TapTap 版本，等渠道进度</div>
+          </div>
+        </div>
+      </div></div>
+      <div class="meta">
+        <div class="line"><b>气质</b> 像机场航班牌：一眼看到每款游戏走到哪一步、卡在哪。</div>
+        <div class="line"><b>关键决定</b> 用横轴表达流程，进度不再是表格里读出来的数字。</div>
+        <div class="line"><b>适合</b> 同时在推进多款、需要知道「下一步卡在谁身上」。</div>
+        <button class="pick qmdp-pick-button" data-dir="C">选择 C · 流程轨道</button>
+      </div>
+    </article>
+
+    <!-- ══════ D · 工作台 ══════ -->
+    <article class="card" data-dir="D" data-name="工作台">
+      <div class="card-head">
+        <span class="id">D</span><span class="nm">工作台</span>
+        <span class="tag">操作导向</span>
+      </div>
+      <div class="stage"><div class="stage-inner scale">
+        <div class="sd-d">
+          <aside class="d-rail">
+            <div class="d-rail-h">游戏</div>
+            <div class="d-item on">
+              <div class="d-dot bad"></div>
+              <div><div class="d-in">晨曦水獭</div><div class="d-is">有阻断</div></div>
+            </div>
+            <div class="d-item">
+              <div class="d-dot warn"></div>
+              <div><div class="d-in">月夜狐灯</div><div class="d-is">基因偏弱</div></div>
+            </div>
+            <div class="d-sep"></div>
+            <div class="d-add">+ 新建游戏</div>
+          </aside>
+          <main class="d-main">
+            <div class="d-mh">
+              <div>
+                <div class="d-mt">晨曦水獭</div>
+                <div class="d-ms">60 秒收集躲避 · 单机 · 微信</div>
+              </div>
+              <div class="d-prev">试玩</div>
+            </div>
+            <div class="d-alert">
+              <div class="d-alert-t">先解决这个</div>
+              <div class="d-alert-d">和「月夜狐灯」的 game.js 字节完全相同，会被判换皮</div>
+              <div class="d-alert-b"><div class="d-btn strong">看差异</div><div class="d-btn">以后再说</div></div>
+            </div>
+            <div class="d-acts">
+              <div class="d-act"><div class="d-act-i">▶</div><div class="d-act-t">构建</div><div class="d-act-s">转换 + 试玩</div></div>
+              <div class="d-act"><div class="d-act-i">◍</div><div class="d-act-t">实测</div><div class="d-act-s">验证爆款基因</div></div>
+              <div class="d-act"><div class="d-act-i">↑</div><div class="d-act-t">打包</div><div class="d-act-s">TapTap 版本</div></div>
+            </div>
+            <div class="d-log">
+              <div class="d-log-i"><span class="d-t">14:42</span> 实测完成，产物 2 项未达</div>
+              <div class="d-log-i"><span class="d-t">11:08</span> 构建通过，164 KB</div>
+            </div>
+          </main>
+        </div>
+      </div></div>
+      <div class="meta">
+        <div class="line"><b>气质</b> 像一块真实的操作台：左边选游戏，右边就是这款游戏的全部可做的事。</div>
+        <div class="line"><b>关键决定</b> 从「看板」变成「工作台」——一次只专注一款，动作按钮主导。</div>
+        <div class="line"><b>适合</b> 习惯一次深做一款，不需要横向比较。</div>
+        <button class="pick qmdp-pick-button" data-dir="D">选择 D · 工作台</button>
+      </div>
+    </article>
+
+  </div>
+</div>
+
+<!-- 确认弹层 -->
+<div class="modal" id="modal">
+  <div class="box">
+    <h2 id="mTitle">确认方向</h2>
+    <div class="sub">确认后会回传到当前工作流，并开始按这个方向实现。</div>
+    <div class="kv" id="mKv"></div>
+    <textarea id="mNotes" placeholder="想调整的地方（可选）：比如「要 A 的封面 + D 的布局」…"></textarea>
+    <div class="acts">
+      <button id="mCancel">取消</button>
+      <button class="go" id="mOk">确认并回传</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast">已回传</div>
+
+<script>
+(function(){
+  const dials = () => ({
+    variance: +document.getElementById('dV').value,
+    motion: +document.getElementById('dM').value,
+    density: +document.getElementById('dD').value
+  });
+  // 拨盘数值实时更新
+  [['dV','oV'],['dM','oM'],['dD','oD']].forEach(([i,o])=>{
+    const inp = document.getElementById(i), out = document.getElementById(o);
+    inp.addEventListener('input', ()=>{ out.textContent = inp.value; });
+  });
+
+  // mockup 等比缩放填满舞台
+  function fit(){
+    document.querySelectorAll('.stage').forEach(stage=>{
+      const inner = stage.querySelector('.stage-inner');
+      const s = stage.clientWidth / 1280;
+      inner.style.transform = `scale(${s})`;
+      stage.style.height = (800*s)+'px';
+    });
+  }
+  window.addEventListener('resize', fit);
+  fit();
+
+  let pending = null;
+  const modal = document.getElementById('modal');
+  const mTitle = document.getElementById('mTitle');
+  const mKv = document.getElementById('mKv');
+  const mNotes = document.getElementById('mNotes');
+
+  function openModal(dir, name){
+    pending = {dir, name};
+    mTitle.textContent = `选择 ${dir} · ${name}`;
+    const d = dials();
+    mKv.textContent = `视觉冒险度 ${d.variance} · 动效强度 ${d.motion} · 信息密度 ${d.density}`;
+    mNotes.value = '';
+    modal.classList.add('on');
+    setTimeout(()=>mNotes.focus(), 60);
+  }
+  function closeModal(){ modal.classList.remove('on'); pending = null; }
+
+  document.querySelectorAll('.pick').forEach(btn=>{
+    btn.addEventListener('click', e=>{
+      e.stopPropagation();
+      const card = btn.closest('.card');
+      openModal(card.dataset.dir, card.dataset.name);
+    });
+  });
+  document.getElementById('mCancel').onclick = closeModal;
+  modal.addEventListener('click', e=>{ if(e.target===modal) closeModal(); });
+  document.addEventListener('keydown', e=>{
+    if(e.key==='Escape' && modal.classList.contains('on')) return closeModal();
+    if(modal.classList.contains('on')) return;
+    const n = {'1':'A','2':'B','3':'C','4':'D'}[e.key];
+    if(!n) return;
+    const card = document.querySelector(`.card[data-dir="${n}"]`);
+    if(card) openModal(n, card.dataset.name);
+  });
+
+  document.getElementById('mOk').onclick = async ()=>{
+    if(!pending) return;
+    const payload = {
+      id: pending.dir, label: pending.name,
+      notes: `方向 ${pending.dir} · ${pending.name}`,
+      dials: dials(),
+      adjustments: mNotes.value.trim()
+    };
+    try{
+      const r = await fetch('/api/select', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+      });
+      if(!r.ok) throw new Error('bad status');
+    }catch(err){
+      // 静态打开时降级：复制到剪贴板
+      try{ await navigator.clipboard.writeText(`选 ${pending.dir}：${pending.name}；拨盘：${JSON.stringify(payload.dials)}；建议：${payload.adjustments||'无'}`); }catch(e){}
+    }
+    document.querySelectorAll('.card').forEach(c=>c.classList.remove('picked'));
+    const card = document.querySelector(`.card[data-dir="${pending.dir}"]`);
+    if(card) card.classList.add('picked');
+    closeModal();
+    document.getElementById('dot').classList.add('ok');
+    document.getElementById('statusText').textContent = '已回传';
+    const t = document.getElementById('toast');
+    t.textContent = `已选择方向 ${payload.id}，已回传`;
+    t.classList.add('on');
+    setTimeout(()=>t.classList.remove('on'), 3200);
+  };
+})();
+</script>
+
+<!-- 各方向 mockup 样式，全部用 .sX- 前缀隔离 -->
+<style>
+/* ══════════ A · 画廊卡册 ══════════ */
+.sa-a{width:1280px;height:800px;background:#fbfaf8;padding:44px 52px;
+  font-family:-apple-system,"PingFang SC",sans-serif;color:#2a2724}
+.sa-a .a-head{display:flex;align-items:baseline;margin-bottom:30px}
+.sa-a .a-title{font-size:32px;font-weight:600;letter-spacing:-.01em}
+.sa-a .a-title span{font-size:15px;font-weight:500;color:#a8a29a;margin-left:10px;
+  font-variant-numeric:tabular-nums}
+.sa-a .a-actions{margin-left:auto;display:flex;gap:12px;align-items:center}
+.sa-a .a-pill{font-size:14px;padding:9px 18px;border-radius:999px;background:#2a2724;color:#fff}
+.sa-a .a-ico{font-size:19px;color:#a8a29a}
+.sa-a .a-cards{display:grid;grid-template-columns:1fr 1fr;gap:30px}
+.sa-a .a-card{background:#fff;border-radius:18px;overflow:hidden;
+  box-shadow:0 2px 10px rgba(42,39,36,.07),0 12px 32px rgba(42,39,36,.05)}
+.sa-a .a-cover{position:relative;height:268px;display:flex;align-items:center;justify-content:center}
+.sa-a .a-cover-art{width:74%;height:auto}
+.sa-a .a-badge{position:absolute;top:16px;left:16px;font-size:13px;font-weight:500;
+  padding:6px 13px;border-radius:999px;backdrop-filter:blur(8px)}
+.sa-a .a-badge.bad{background:rgba(255,236,232,.94);color:#b4342a}
+.sa-a .a-badge.warn{background:rgba(255,247,230,.94);color:#8a5a12}
+.sa-a .a-body{padding:22px 24px 24px}
+.sa-a .a-name{font-size:22px;font-weight:600}
+.sa-a .a-desc{font-size:14px;color:#8a8378;margin-top:5px}
+.sa-a .a-health{display:flex;gap:9px;margin-top:15px}
+.sa-a .a-h{font-size:13px;padding:5px 11px;border-radius:7px;font-variant-numeric:tabular-nums}
+.sa-a .a-h.bad{background:#fdeeea;color:#b4342a}
+.sa-a .a-h.warn{background:#fdf6e6;color:#8a5a12}
+.sa-a .a-next{font-size:13.5px;color:#6a635a;margin-top:15px;padding-top:15px;
+  border-top:1px solid #f0ece6;line-height:1.55}
+.sa-a .a-todo{margin-top:34px;background:#fff;border-radius:16px;padding:24px 26px;
+  box-shadow:0 2px 10px rgba(42,39,36,.06)}
+.sa-a .a-todo-h{font-size:17px;font-weight:600;margin-bottom:16px}
+.sa-a .a-todo-h b{color:#b4342a;font-variant-numeric:tabular-nums;margin-left:5px}
+.sa-a .a-todo-i{display:flex;align-items:center;gap:12px;font-size:14.5px;color:#4a453f;
+  padding:9px 0;border-top:1px solid #f5f1eb}
+.sa-a .a-todo-i i{width:7px;height:7px;border-radius:50%;background:#d8b45a;flex:none}
+
+/* ══════════ B · 编辑式日报 ══════════ */
+.sb-b{width:1280px;height:800px;background:#fdfcf9;padding:46px 56px;
+  font-family:-apple-system,"PingFang SC",sans-serif;color:#1a1815}
+.sb-b .b-mast{display:flex;align-items:flex-end;border-bottom:3px double #1a1815;
+  padding-bottom:20px;margin-bottom:30px}
+.sb-b .b-kicker{font-size:11.5px;letter-spacing:.14em;color:#8a8378;margin-bottom:12px}
+.sb-b .b-h{font-size:38px;font-weight:600;line-height:1.18;letter-spacing:-.02em}
+.sb-b .b-mast-r{margin-left:auto;text-align:right}
+.sb-b .b-num{font-size:52px;font-weight:700;line-height:1;color:#b4342a;
+  font-variant-numeric:tabular-nums}
+.sb-b .b-num-l{font-size:12.5px;color:#8a8378;margin-top:5px}
+.sb-b .b-lead{display:grid;grid-template-columns:1fr;gap:11px;padding-bottom:28px;
+  border-bottom:1px solid #ddd8cf;margin-bottom:26px}
+.sb-b .b-lead-t{font-size:25px;font-weight:600;line-height:1.32}
+.sb-b .b-lead-d{font-size:15px;color:#5a544c;line-height:1.72;max-width:92%}
+.sb-b .b-lead-a{font-size:14px;color:#b4342a;font-weight:500}
+.sb-b .b-row{display:grid;grid-template-columns:200px 90px 70px 1fr;
+  align-items:center;gap:20px;padding:17px 0;border-bottom:1px solid #efeae1}
+.sb-b .b-row-n{font-size:17px;font-weight:600}
+.sb-b .b-row-c{font-size:13px;font-weight:500;padding:4px 0}
+.sb-b .b-row-c.bad{color:#b4342a}
+.sb-b .b-row-s{font-size:16px;font-variant-numeric:tabular-nums;color:#6a635a}
+.sb-b .b-row-x{font-size:14px;color:#8a8378}
+
+/* ══════════ C · 流程轨道 ══════════ */
+.sc-c{width:1280px;height:800px;background:#f7f8fa;padding:44px 52px;
+  font-family:-apple-system,"PingFang SC",sans-serif;color:#1c2024}
+.sc-c .c-top{display:flex;align-items:baseline;margin-bottom:34px}
+.sc-c .c-h{font-size:30px;font-weight:600}
+.sc-c .c-legend{margin-left:auto;font-size:13px;color:#7a828c;display:flex;align-items:center;gap:7px}
+.sc-c .c-lg{width:9px;height:9px;border-radius:50%;display:inline-block;margin-left:12px}
+.sc-c .c-lg.done{background:#3d8c62}
+.sc-c .c-lg.cur{background:#2f6fd0}
+.sc-c .c-lg.blk{background:#c8483a}
+.sc-c .c-lane{background:#fff;border-radius:16px;padding:26px 30px;margin-bottom:20px;
+  box-shadow:0 1px 3px rgba(28,32,36,.06)}
+.sc-c .c-lane-h{display:flex;align-items:baseline;gap:14px;margin-bottom:24px}
+.sc-c .c-lane-n{font-size:21px;font-weight:600}
+.sc-c .c-lane-s{font-size:13.5px;color:#7a828c}
+.sc-c .c-track{display:flex;align-items:flex-start;position:relative;padding-bottom:16px}
+.sc-c .c-step{flex:1;display:flex;flex-direction:column;align-items:center;gap:9px;
+  position:relative;z-index:2}
+.sc-c .c-step span{width:26px;height:26px;border-radius:50%;background:#fff;
+  border:2px solid #d4d9df;display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:600;color:#fff}
+.sc-c .c-step em{font-style:normal;font-size:13px;color:#8a929c}
+.sc-c .c-step.done span{background:#3d8c62;border-color:#3d8c62}
+.sc-c .c-step.done em{color:#3d8c62}
+.sc-c .c-step.blk span{background:#c8483a;border-color:#c8483a}
+.sc-c .c-step.blk em{color:#c8483a;font-weight:600}
+.sc-c .c-bar{position:absolute;left:8%;right:8%;bottom:26px;height:2px;background:#e6e9ed;
+  border-radius:2px;z-index:1}
+.sc-c .c-fill{height:100%;background:#3d8c62;border-radius:2px}
+.sc-c .c-why{font-size:13.5px;color:#7a828c;padding-top:6px}
+
+/* ══════════ D · 工作台 ══════════ */
+.sd-d{width:1280px;height:800px;display:flex;background:#0f1115;
+  font-family:-apple-system,"PingFang SC",sans-serif;color:#e8eaed}
+.sd-d .d-rail{width:300px;flex:none;background:#161920;padding:30px 20px;
+  border-right:1px solid #232830}
+.sd-d .d-rail-h{font-size:12px;letter-spacing:.1em;color:#6b7280;margin-bottom:16px;padding-left:12px}
+.sd-d .d-item{display:flex;align-items:center;gap:13px;padding:13px 14px;border-radius:11px;
+  margin-bottom:6px}
+.sd-d .d-item.on{background:#232a35}
+.sd-d .d-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.sd-d .d-dot.bad{background:#e05545}
+.sd-d .d-dot.warn{background:#d8a33a}
+.sd-d .d-in{font-size:15.5px;font-weight:500}
+.sd-d .d-is{font-size:12px;color:#6b7280;margin-top:2px}
+.sd-d .d-sep{height:1px;background:#232830;margin:18px 12px}
+.sd-d .d-add{font-size:14px;color:#6b7280;padding:10px 14px}
+.sd-d .d-main{flex:1;padding:34px 40px;overflow:hidden}
+.sd-d .d-mh{display:flex;align-items:flex-start;margin-bottom:26px}
+.sd-d .d-mt{font-size:29px;font-weight:600}
+.sd-d .d-ms{font-size:14px;color:#7a828c;margin-top:6px}
+.sd-d .d-prev{margin-left:auto;font-size:13.5px;padding:9px 17px;border-radius:9px;
+  border:1px solid #2e3540;color:#b9c0c9}
+.sd-d .d-alert{background:#241a19;border:1px solid #4a2b27;border-radius:14px;
+  padding:22px 24px;margin-bottom:26px}
+.sd-d .d-alert-t{font-size:12px;letter-spacing:.08em;color:#e05545;margin-bottom:9px}
+.sd-d .d-alert-d{font-size:16px;line-height:1.55;color:#f0e6e4}
+.sd-d .d-alert-b{display:flex;gap:11px;margin-top:17px}
+.sd-d .d-btn{font-size:13.5px;padding:9px 17px;border-radius:8px;border:1px solid #3a3f48;
+  color:#c3c9d1}
+.sd-d .d-btn.strong{background:#e05545;border-color:#e05545;color:#fff;font-weight:500}
+.sd-d .d-acts{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:28px}
+.sd-d .d-act{background:#1a1e26;border:1px solid #232830;border-radius:13px;padding:20px 22px}
+.sd-d .d-act-i{font-size:21px;color:#5b8dd6;margin-bottom:12px}
+.sd-d .d-act-t{font-size:16.5px;font-weight:500}
+.sd-d .d-act-s{font-size:12.5px;color:#6b7280;margin-top:4px}
+.sd-d .d-log{background:#141821;border-radius:13px;padding:20px 24px}
+.sd-d .d-log-i{font-size:13.5px;color:#9aa3ad;padding:7px 0;display:flex;gap:14px}
+.sd-d .d-t{color:#5b6270;font-variant-numeric:tabular-nums}
+</style>
+</body>
+</html>

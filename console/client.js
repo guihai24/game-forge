@@ -40,6 +40,12 @@ window.__ModuleLoader__.load({
 .gc-root :focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
 .gc-top{height:46px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid var(--dsw-alias-border-l2)}
 .gc-top h1{font-size:14px;font-weight:600;margin:0}
+/* 桌面应用用了隐藏式标题栏，红黄绿窗口按钮会盖住左上角内容。
+   给这块留出空间，Web 端窗口按钮不在文档流里所以不影响。 */
+/* 桌面窗口的红黄绿按钮压在这块区域，Web 端没有。
+   不做环境探测——探测不可靠，宁可让 Web 端多 78px 左边距，
+   也不能让桌面端标题被窗口按钮盖住。 */
+.gc-top-safe{width:78px;flex:none}
 .gc-sub{font-size:12px;color:var(--dsw-alias-label-tertiary)}
 .gc-grow{flex:1}
 .gc-btn{font:inherit;font-size:12px;padding:5px 11px;border-radius:7px;cursor:pointer;border:1px solid var(--dsw-alias-border-l3);background:transparent;color:inherit;transition:background-color .12s,border-color .12s,color .12s}
@@ -99,6 +105,60 @@ window.__ModuleLoader__.load({
 .gc-chip.done{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}
 .gc-chip.active{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
 .gc-chip.failed{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}
+
+/* ══════════ 游戏画廊 ══════════
+   卡片是页面主体：先看见游戏长什么样，再看它的体检报告。
+   状态收成封面上的徽章，不占正文空间。 */
+.gc-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(292px,1fr));gap:20px;margin-bottom:28px}
+.gc-card{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);
+  border-radius:14px;overflow:hidden;display:flex;flex-direction:column;
+  transition:border-color .16s,box-shadow .16s}
+.gc-card:hover{border-color:var(--dsw-alias-border-l3);box-shadow:0 4px 16px rgba(0,0,0,.06)}
+
+/* 封面：真实美术居中，四周留白，不放满整个卡片 */
+.gc-cover{position:relative;height:178px;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(150deg,rgba(122,158,176,.16),rgba(46,84,104,.10))}
+.gc-cover.is-blocked{background:linear-gradient(150deg,rgba(180,52,42,.13),rgba(180,52,42,.05))}
+.gc-cover.is-weak{background:linear-gradient(150deg,rgba(200,150,60,.15),rgba(160,110,30,.05))}
+.gc-cover-img{max-height:146px;max-width:68%;object-fit:contain;
+  filter:drop-shadow(0 6px 14px rgba(0,0,0,.13))}
+.gc-cover-fallback{font-size:44px;font-weight:600;color:var(--dsw-alias-label-tertiary);opacity:.5}
+
+.gc-badges{position:absolute;top:9px;left:9px;display:flex;flex-direction:column;align-items:flex-start;gap:5px}
+.gc-badge2{font-size:10.5px;font-weight:500;padding:3px 9px;border-radius:999px;
+  backdrop-filter:blur(8px);white-space:nowrap;font-variant-numeric:tabular-nums}
+.gc-badge2.bad{background:rgba(255,236,232,.94);color:#b4342a}
+.gc-badge2.warn{background:rgba(255,247,230,.94);color:#8a5a12}
+.gc-badge2.ok{background:rgba(234,247,239,.94);color:#1f7a4d}
+
+.gc-cover-busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  gap:7px;background:rgba(255,255,255,.86);font-size:12px;color:var(--dsw-alias-brand-primary);
+  padding:0 16px;text-align:center;line-height:1.5}
+
+.gc-card-body{padding:13px 15px 11px;flex:1}
+.gc-card-title{font-size:15px;font-weight:600;margin:0;line-height:1.35;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gc-card-sub{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin-top:3px}
+/* 下一步：一句话说清最该处理的事，最多两行 */
+.gc-card-next{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:9px;
+  line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden}
+
+.gc-card-actions{display:flex;gap:1px;border-top:1px solid var(--dsw-alias-border-l2);
+  background:var(--dsw-alias-border-l2)}
+.gc-abtn{flex:1;font:inherit;font-size:12px;padding:9px 4px;border:0;cursor:pointer;
+  background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);
+  transition:background-color .12s,color .12s}
+.gc-abtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.gc-abtn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}
+.gc-abtn:disabled{opacity:.34;cursor:default}
+.gc-abtn-ghost{color:var(--dsw-alias-label-tertiary);flex:0 0 auto;padding:9px 12px}
+.gc-abtn-ghost:hover:not(:disabled){color:var(--dsw-alias-state-error-primary)}
+
+.gc-empty-card{grid-column:1/-1;padding:52px 24px;text-align:center;
+  border:1px dashed var(--dsw-alias-border-l3);border-radius:14px}
+.gc-empty-t{font-size:14px;font-weight:600;margin-bottom:6px}
+.gc-empty-d{font-size:12.5px;color:var(--dsw-alias-label-secondary)}
 `;
 
     /* ---------- 取数 ---------- */
@@ -251,190 +311,99 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'gc-root' },
         h('style', null, CSS),
         h('div', { className: 'gc-top' },
+          // 左侧留出桌面窗口的红黄绿按钮的位置，避免标题被压住
+          h('div', { className: 'gc-top-safe' }),
           h('h1', null, '工作室'),
-          h('span', { className: 'gc-sub' }, `${stats.total} 款游戏`),
+          h('span', { className: 'gc-sub' },
+            `${stats.total} 款游戏`,
+            stats.tasks > 0 ? ` · ${stats.tasks} 项待处理` : ' · 没有待处理'
+          ),
           h('span', { className: 'gc-grow' }),
           h('button', { className: 'gc-btn', onClick: load }, '刷新')
         ),
         h('div', { className: 'gc-scroll' },
           state.error && h('div', { className: 'gc-empty', style: { color: 'var(--dsw-alias-state-error-primary)' } }, state.error),
 
-          h('div', { className: 'gc-stats' },
-            h('div', { className: 'gc-stat' }, h('div', { className: 'k' }, '游戏'), h('div', { className: 'v' }, String(stats.total))),
-            h('div', { className: 'gc-stat' }, h('div', { className: 'k' }, '已上线'), h('div', { className: 'v' }, String(stats.live))),
-            h('div', { className: 'gc-stat' }, h('div', { className: 'k' }, '进行中'), h('div', { className: 'v' }, String(stats.review))),
-            h('div', { className: 'gc-stat' }, h('div', { className: 'k' }, '待你处理'), h('div', { className: 'v', style: { color: stats.tasks ? 'var(--dsw-alias-state-warn-primary)' : undefined } }, String(stats.tasks)))
-          ),
+          // ── 游戏画廊：卡片是页面主体 ──
+          h('div', { className: 'gc-gallery' },
+            state.games.length === 0
+              ? h('div', { className: 'gc-empty-card' },
+                h('div', { className: 'gc-empty-t' }, '还没有游戏'),
+                h('div', { className: 'gc-empty-d' }, '用 Game Studio 做一个，或把已有工程放进工作区。'))
+              : state.games.map((g) => {
+                const st = g.state || {};
+                const v = st.viral;
+                const a = st.audit;
+                const blocks = a ? a.items.filter((i) => i.level === 'BLOCK') : [];
+                const hasBlock = blocks.length > 0;
+                const busy = state.jobRunning && state.job && state.job.project === g.project;
+                const anyBusy = state.jobRunning;
+                const cover = st.cover;
 
-          h('div', { className: 'gc-board' },
-            h('div', { className: 'gc-board-scroll' },
-            h('table', null,
-              h('thead', null, h('tr', null,
-                h('th', { style: { width: '24%' } }, '游戏 / 值不值得上架'),
-                CHANNELS.map((c) => h('th', { key: c.id, style: { width: '12%' } }, c.label)),
-                h('th', { style: { width: '92px' } }, '合规'),
-                h('th', { style: { width: '92px' } }, '基因'),
-                h('th', { style: { width: '120px', textAlign: 'right' } }, '')
-              )),
-              h('tbody', null,
-                state.games.length === 0
-                  ? h('tr', null, h('td', { colspan: 7 }, h('div', { className: 'gc-empty' }, '工作区里还没有游戏。用 Game Studio 做一个，或把已有工程放进工作区。')))
-                  : state.games.map((g) => {
-                    const channels = g.state.channels || {};
-                    const busy = state.jobRunning && state.job && state.job.project === g.project;
-                    const anyBusy = state.jobRunning;
-                    return h('tr', { key: g.project },
-                      h('td', null,
-                        h('div', { className: 'gc-name' }, g.state.title || g.project),
-                        // 值不值得上架：把合规和基因合起来一句话说完，不用点开
-                        (() => {
-                          const parts = [];
-                          const a = g.state.audit;
-                          if (a) {
-                            const blocks = a.items.filter((i) => i.level === 'BLOCK').length;
-                            parts.push(blocks ? `合规：有 ${blocks} 项 BLOCK` : '合规：通过');
-                          }
-                          if (g.state.viral) parts.push(`基因：${g.state.viral.score}/${g.state.viral.total}`);
-                          if (!parts.length) return h('div', { className: 'gc-gid' }, g.project);
-                          return h('div', {
-                            className: `gc-verdict ${a && a.items.some((i) => i.level === 'BLOCK') ? 'bad' : (g.state.viral && g.state.viral.verdict === 'suggest-drop' ? 'weak' : 'good')}`,
-                            title: g.state.viral ? g.state.viral.summary : ''
-                          }, parts.join('　·　'));
-                        })(),
-                        g.state.probe
-                          ? h('div', {
-                            className: 'gc-gid',
-                            style: g.state.probe.stale ? { color: 'var(--dsw-alias-state-warn-primary)' } : undefined,
-                            title: `实测于 ${String(g.state.probe.at || '').replace('T', ' ').slice(0, 16)}`
-                          }, g.state.probe.stale
-                            ? `⚠ 实测已过期（构建后有改动）：${g.state.probe.summary}`
-                            : g.state.probe.summary)
-                          : null
-                      ),
-                      CHANNELS.map((c) => {
-                        // TapTap 没建台账时，用打包产物说明状态：有 zip 就是「已打包」
-                        if (c.id === 'taptap' && !stageSummary(channels.taptap) && g.state.taptapZip) {
-                          return h('td', { key: c.id },
-                            h('span', { className: 'gc-st gc-run', title: `${g.state.taptapZip.file} · ${Math.round(g.state.taptapZip.bytes / 1024)} KB` },
-                              `○ 已打包`)
-                          );
-                        }
-                        const s = stageSummary(channels[c.id]);
-                        const cls = s ? { ok: 'gc-ok', warn: 'gc-warn', err: 'gc-err', run: 'gc-run', none: 'gc-none' }[s.tone] : 'gc-none';
-                        return h('td', { key: c.id },
-                          h('span', { className: `gc-st ${cls}`, title: s && s.title ? s.title : undefined },
-                            s ? `${s.mark} ${s.text}` : '—')
-                        );
-                      }),
-                      h('td', null,
-                        (() => {
-                          const a = g.state.audit;
-                          if (!a) return h('span', { className: 'gc-st gc-none' }, '—');
-                          const blocks = a.items.filter((i) => i.level === 'BLOCK');
-                          const warns = a.items.filter((i) => i.level === 'WARN');
-                          if (blocks.length) {
-                            return h('span', {
-                              className: 'gc-st gc-err',
-                              title: blocks.map((b) => `${b.msg}\n→ ${b.hint}`).join('\n\n')
-                            }, `✗ ${blocks.length} 阻断`);
-                          }
-                          if (warns.length) {
-                            return h('span', {
-                              className: 'gc-st gc-warn',
-                              title: warns.map((w) => `${w.msg}\n→ ${w.hint}`).join('\n\n')
-                            }, `⚠ ${warns.length}`);
-                          }
-                          return h('span', { className: 'gc-st gc-ok' }, '✓');
-                        })()
-                      ),
-                      // 基因：Gate 1 打分 + 砍线状态；悬停看每一项
-                      h('td', null,
-                        (() => {
-                          const v = g.state.viral;
-                          if (!v) return h('span', { className: 'gc-st gc-none' }, '—');
-                          const tone = v.verdict === 'suggest-drop' ? 'gc-warn' : 'gc-ok';
-                          const tip = [
-                            `viral-dna ${v.score}/${v.total}${v.reconciled ? '（已并入产物实测）' : '（仅 brief 静态判定）'}`,
-                            ...v.failed.map((i) => `${i.needsHuman ? '?' : (i.unmeasured ? '·' : '⚠')} ${i.id} ${i.label}：${i.detail}`),
-                            ...(v.overridden || []).map((o) => `↑ ${o.id} ${o.label} 被 ${o.by} 实测修正`),
-                            // 方向没标：项本身通过了，所以不在 failed 里，必须单独说
-                            v.needsDirection ? '⚠ trend_evidence 未标 trend_direction，机器不猜方向，VD-08 判不出该不该砍' : null,
-                            // note 里是 verdict 的原因说明，之前从没显示过
-                            v.note ? `\n${v.note}` : null,
-                            '',
-                            v.summary
-                          ].filter((x) => x !== null).join('\n');
-                          return h('span', { className: `gc-st ${tone}`, title: tip },
-                            // 光看 "5/8" 不知道算好算坏，配一条 8 格的进度条让程度可见。
-                            // 已达标的格用当前色，未达标用极淡的底色。
-                            h('span', { className: 'gc-dots', 'aria-hidden': 'true' },
-                              Array.from({ length: v.total }, (_, i) => h('span', {
-                                key: i,
-                                className: i < v.score ? 'on' : ''
-                              }))
-                            ),
-                            `${v.score}/${v.total}`,
-                            v.needsDirection
-                              ? h('span', { className: 'gc-warn', style: { fontSize: 10, marginLeft: 2 } }, '⚠方向')
-                              : null,
-                            v.reconciled ? null : h('span', { style: { opacity: 0.55, fontSize: 10, marginLeft: 2 } }, '静态')
-                          );
-                        })()
-                      ),
-                      h('td', { style: { textAlign: 'right', whiteSpace: 'nowrap' } },
-                        busy
-                          ? h('span', { className: 'gc-st gc-run' }, `◐ ${state.job.total ? `${state.job.phase}/${state.job.total}` : '…'}`)
-                          : h(Fragment, null,
-                            h('button', {
-                              className: 'gc-btn sm',
-                              disabled: anyBusy,
-                              title: anyBusy ? '已有任务在跑（模拟器串行）' : '转换 + 试玩 + 断言 + 截图',
-                              onClick: () => startBuild(g.project, 'wechat')
-                            }, '构建'),
-                            h('button', {
-                              className: 'gc-btn sm',
-                              style: { marginLeft: 6 },
-                              disabled: anyBusy,
-                              title: anyBusy ? '已有任务在跑' : '打成单文件 HTML 并验证',
-                              onClick: () => startBuild(g.project, 'web')
-                            }, '网页'),
-                            h('button', {
-                              className: 'gc-btn sm',
-                              style: { marginLeft: 6 },
-                              disabled: anyBusy || (g.state.audit ? !g.state.audit.ok : false),
-                              title: g.state.audit && !g.state.audit.ok
-                                ? `自审有 ${g.state.audit.blocked} 项阻断，先改：${g.state.audit.items.filter((i) => i.level === 'BLOCK').map((i) => i.msg).join('；')}`
-                                : '打成 TapTap 合规 zip（一级目录 + index.html，排除 game.json）',
-                              onClick: () => startBuild(g.project, 'web', 'package-taptap')
-                            }, 'TT包'),
-                            h('button', {
-                              className: 'gc-btn sm',
-                              style: { marginLeft: 6 },
-                              disabled: anyBusy,
-                              title: anyBusy
-                                ? '已有任务在跑'
-                                : 'Gate 2：起浏览器实测分享/反馈延迟/单局时长/冷启动，不采信 brief 自述',
-                              onClick: () => startBuild(g.project, 'web', 'probe')
-                            }, '实测'),
-                            // 归档是销毁性动作（虽然可恢复），不该和构建按钮平级。
-                            // 用分隔线隔开 + 弱化文字样式，避免误点。
-                            h('span', { style: { margin: '0 2px 0 10px', color: 'var(--dsw-alias-border-l3)' } }, '|'),
-                            h('button', {
-                              className: 'gc-btn sm gc-btn-ghost',
-                              disabled: anyBusy,
-                              title: '移到 _archive/，不再出现在看板上。不删文件，可恢复。',
-                              onClick: () => {
-                                if (typeof window !== 'undefined' && window.confirm && !window.confirm(`把「${g.state.title || g.project}」移到归档区？\n\n不删任何文件，之后可以从 _archive/ 手动移回。`)) return;
-                                archiveGame(g.project, g.state.viral && g.state.viral.verdict === 'suggest-drop' ? '基因砍线' : '');
-                              }
-                            }, '归档')
-                          )
-                      )
-                    );
-                  })
-              )
-            )
-            )
+                const badges = [];
+                if (hasBlock) badges.push({ tone: 'bad', text: '合规 阻断' });
+                else if (a) badges.push({ tone: 'ok', text: '合规 通过' });
+                if (v) badges.push({ tone: v.verdict === 'suggest-drop' ? 'warn' : 'ok', text: `基因 ${v.score}/${v.total}` });
+
+                let nextText = '';
+                if (hasBlock) nextText = blocks[0].msg;
+                else if (v && v.negativeTrend) nextText = '品类当前无窗口期，建议归档';
+                else if (st.probe && st.probe.ok === false) nextText = st.probe.summary;
+                else if (!a) nextText = '还没跑过自审';
+
+                return h('article', { className: 'gc-card', key: g.project },
+                  h('div', { className: `gc-cover ${hasBlock ? 'is-blocked' : (v && v.verdict === 'suggest-drop' ? 'is-weak' : '')}` },
+                    cover
+                      ? h('img', {
+                        className: 'gc-cover-img',
+                        src: cover.url,
+                        alt: `${st.title || g.project} 的主形象`,
+                        loading: 'lazy'
+                      })
+                      : h('div', { className: 'gc-cover-fallback' }, (st.title || g.project).slice(0, 1)),
+                    badges.length > 0 && h('div', { className: 'gc-badges' },
+                      badges.map((b, i) => h('span', { className: `gc-badge2 ${b.tone}`, key: i }, b.text))
+                    ),
+                    busy && h('div', { className: 'gc-cover-busy' }, '◐ ', state.job.line || '处理中…')
+                  ),
+                  h('div', { className: 'gc-card-body' },
+                    h('h3', { className: 'gc-card-title' }, st.title || g.project),
+                    h('div', { className: 'gc-card-sub' },
+                      [st.genre, st.offline ? '单机' : '联网'].filter(Boolean).join(' · ')
+                    ),
+                    nextText && h('div', { className: 'gc-card-next' }, nextText)
+                  ),
+                  h('div', { className: 'gc-card-actions' },
+                    h('button', {
+                      className: 'gc-abtn',
+                      disabled: anyBusy,
+                      title: '转换 + 试玩 + 断言 + 截图',
+                      onClick: () => startBuild(g.project, 'wechat')
+                    }, '构建'),
+                    h('button', {
+                      className: 'gc-abtn',
+                      disabled: anyBusy,
+                      title: 'Gate 2：起浏览器实测产物，不采信 brief 自述',
+                      onClick: () => startBuild(g.project, 'web', 'probe')
+                    }, '实测'),
+                    h('button', {
+                      className: 'gc-abtn',
+                      disabled: anyBusy || hasBlock,
+                      title: hasBlock ? `有 ${blocks.length} 项合规阻断，先改` : '打成 TapTap 合规 zip',
+                      onClick: () => startBuild(g.project, 'web', 'package-taptap')
+                    }, '打包'),
+                    h('button', {
+                      className: 'gc-abtn gc-abtn-ghost',
+                      disabled: anyBusy,
+                      title: '移到归档区，不删文件',
+                      onClick: () => {
+                        if (typeof window !== 'undefined' && window.confirm && !window.confirm(`把「${st.title || g.project}」移到归档区？\n\n不删任何文件，之后可以从 _archive/ 手动移回。`)) return;
+                        archiveGame(g.project, v && v.verdict === 'suggest-drop' ? '基因砍线' : '');
+                      }
+                    }, '归档')
+                  )
+                );
+              })
           ),
 
           state.job && h('div', {

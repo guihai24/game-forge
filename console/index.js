@@ -291,6 +291,26 @@ function restoreGame(root, payload) {
   return { restored: path.basename(src) };
 }
 
+/* ---------- 封面 ---------- *
+ *
+ * 画廊式看板需要游戏的真实美术，否则就是一堆色块。
+ * 从 assets/ASSETS.json 的 hero 槽取主形象；没有就用 background。
+ * 只返回相对路径 + 哈希，客户端拼 dsh-resource:// 自己加载。
+ */
+function coverOf(dir) {
+  const assets = readJson(path.join(dir, 'assets', 'ASSETS.json'));
+  if (!assets || !assets.assets) return null;
+  for (const slot of ['hero', 'pickup', 'enemy', 'background']) {
+    const a = assets.assets[slot];
+    if (a && a.file) {
+      const abs = path.join(dir, a.file);
+      if (!fs.existsSync(abs)) continue;
+      return { slot, file: a.file, abs, bytes: fs.statSync(abs).size };
+    }
+  }
+  return null;
+}
+
 function scanAll(root) {
   const dirs = findGames(root);
   // 自审要跨游戏比对同质化，所以整批一起算，不是逐款算。
@@ -348,6 +368,19 @@ function scanAll(root) {
         revenue: state.revenue || {},
         built: state.built || null,
         taptapZip,
+        // 封面：画廊式界面靠它让用户一眼认出是哪款游戏。
+        // 直接给可用的 URL——客户端拼 dsh-resource:// 在浏览器里加载不了，
+        // 宿主的 /api/file 路由接受绝对路径且自带鉴权，是唯一可靠的读法。
+        cover: (() => {
+          const c = coverOf(dir);
+          if (!c) return null;
+          return {
+            slot: c.slot,
+            file: c.file,
+            bytes: c.bytes,
+            url: `/api/file?path=${encodeURIComponent(c.abs)}`
+          };
+        })(),
         audit,
         viral: gate1 ? {
           score: gate1.score,
@@ -612,10 +645,17 @@ export function apply(ctx, config = {}) {
    */
   let cachedRoot = null;
 
-  /* 快照格式版本。读端只采信 schema >= 本值的数据。
-   * 桌面应用和 web 实例会共用全局快照目录，旧进程写的是旧格式，
-   * 靠这个字段判断该不该采信。 */
-  const SCHEMA = 2;
+  /* 快照格式版本。读端只采信 schema 最高的那份。
+   *
+   * 桌面应用和 web 实例共用全局快照目录。旧进程写的是旧格式，靠这个字段
+   * 判断该采信谁。**每次给快照加字段都要 +1**，否则旧进程写的数据会盖掉
+   * 新字段（实测发生过：desktop 是旧代码，它写的 cover:null 覆盖了
+   * web 写好的 cover.url，卡片退回首字占位）。
+   *
+   * v2: audit / viral / probe
+   * v3: cover
+   */
+  const SCHEMA = 3;
 
   /* 多实例共存：桌面应用和 `dsh --profile web` 会同时跑，共用同一个工作区。
    * 早期两份进程都往 <root>/.game-console/state.json 和 ~/.dsh/game-console/state.json

@@ -1,0 +1,14 @@
+{
+  "id": "A",
+  "label": "A: 画廊卡册",
+  "name": "画廊卡册",
+  "notes": "",
+  "dials": {
+    "variance": 9,
+    "motion": 7,
+    "density": 6
+  },
+  "adjustments": "",
+  "source": "click",
+  "receivedAt": "2026-11-14T09:02:59.148Z"
+}
