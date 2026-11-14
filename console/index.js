@@ -311,6 +311,99 @@ function coverOf(dir) {
   return null;
 }
 
+/* ---------- 新建游戏 ---------- *
+ *
+ * 只做到"落 brief + 跑 Gate 1"。游戏本身由 Game Studio 生成，那一步不在这里做——
+ * 假装能一键生成，只会让人以为平台能替掉生成器。
+ *
+ * 但新建这一刻是 Gate 1 最有价值的时刻：在写代码之前就知道值不值得做。
+ * 所以 create 一定会顺手把 viral-dna 分数算出来。
+ */
+async function createGame(root, payload) {
+  const title = String(payload.title || '').trim();
+  const slug = String(payload.slug || '').trim() || slugify(title);
+  if (!title) throw new Error('游戏名不能为空');
+  if (!slug) throw new Error('目录名不能为空（会用游戏名自动生成，也可以自己填）');
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) throw new Error(`目录名只能用小写字母、数字和连字符，当前是 "${slug}"`);
+
+  const rootAbs = path.resolve(root);
+  const dir = path.join(rootAbs, 'games', slug);
+  if (!dir.startsWith(rootAbs)) throw new Error('路径越界');
+  if (fs.existsSync(path.join(dir, 'game.brief.json'))) {
+    throw new Error(`games/${slug}/game.brief.json 已存在，换个目录名`);
+  }
+
+  const brief = {
+    version: 1,
+    title,
+    genre: String(payload.genre || '').trim(),
+    target: ['wechat', 'web'].includes(payload.target) ? payload.target : 'wechat',
+    offline: payload.offline !== false,
+    iap: payload.iap === true,
+    share: payload.share ? { kind: String(payload.share) } : null,
+    pace: String(payload.pace || '').trim(),
+    emotion_theme: String(payload.emotion_theme || '').trim(),
+    trend_evidence: String(payload.trend_evidence || '').trim(),
+    trend_direction: ['positive', 'negative'].includes(payload.trend_direction) ? payload.trend_direction : '',
+    rules: {
+      duration: Number(payload.duration) || 60,
+      hearts: Number(payload.hearts) || 3
+    },
+    acceptance: {
+      mustReachPhase: ['playing'],
+      minFps: 45,
+      mustScore: 0
+    },
+    channel: {
+      appid: String(payload.appid || '').trim(),
+      orientation: payload.orientation === 'portrait' ? 'portrait' : 'landscape'
+    },
+    notes: String(payload.notes || '').trim()
+  };
+
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'game.brief.json'), `${JSON.stringify(brief, null, 2)}\n`, 'utf8');
+
+  // 当场跑两层自审：合规 + 基因。基因分是这次新建的核心产出。
+  let audit = null;
+  let viral = null;
+  try {
+    const { makeReport, checkBrief } = await import('../engine/scripts/precheck-lib.mjs');
+    const { scoreBrief } = await import('../engine/scripts/viral-dna-lib.mjs');
+    const report = makeReport();
+    checkBrief(brief, brief.target === 'wechat' ? 'wechat' : 'taptap', report);
+    audit = {
+      ok: !report.blocked.length,
+      blocked: report.blocked.length,
+      warned: report.warned.length,
+      items: report.items
+    };
+    const g1 = scoreBrief(brief, { offline: brief.offline, iap: brief.iap });
+    viral = {
+      score: g1.score,
+      total: g1.total,
+      verdict: g1.verdict,
+      negativeTrend: Boolean(g1.negativeTrend),
+      needsDirection: Boolean(g1.needsDirection),
+      note: g1.note,
+      failed: g1.failed.map((i) => ({ id: i.id, label: i.label, detail: i.detail, needsHuman: Boolean(i.needsHuman) }))
+    };
+  } catch (e) {
+    // 自审跑挂了不该让新建失败——brief 已经落盘了
+    viral = { error: String(e && e.message ? e.message : e) };
+  }
+
+  return { project: `games/${slug}`, dir, brief, audit, viral };
+}
+
+function slugify(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
 function scanAll(root) {
   const dirs = findGames(root);
   // 自审要跨游戏比对同质化，所以整批一起算，不是逐款算。
@@ -777,6 +870,55 @@ export function apply(ctx, config = {}) {
     return () => { alive = false; clearInterval(timer); };
   }, 'game-console: snapshot loop');
 
+  // 面板动作走一条独立的 HTTP 路由，不经过命令通道。
+  //
+  // 为什么：commands.execute 必须落在一个"归当前实例所有"的会话上。
+  // 桌面应用和 web 实例共享 ~/.dsh，侧栏里能看见对方的会话；
+  // 一旦面板绑到的会话被另一侧持有写句柄，任何写操作都会报
+  //   session "..." is already owned by an active write handle
+  // 新建、归档、起构建这些根本不需要会话——它们只读工作区、写工作区文件。
+  // 走 connection.fetch 注册的这条路同样在宿主的鉴权栅栏内。
+  ctx.inject(['connection'], (child) => {
+    const respond = (status, body) => new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
+    });
+
+    child.effect(() => child.connection.fetch.register({
+      path: '/api/game-console',
+      methods: ['POST'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        let body = null;
+        try { body = await request.json(); } catch (e) { return respond(400, { ok: false, error: '请求体不是合法 JSON' }); }
+        const action = String((body && body.action) || '');
+        const payload = (body && body.payload) || {};
+        try {
+          const root = await resolveRoot(null);
+          if (!root) return respond(500, { ok: false, error: '找不到工作区' });
+          let out;
+          if (action === 'create') out = await createGame(root, payload);
+          else if (action === 'archive') out = archiveGame(root, payload);
+          else if (action === 'restore') out = restoreGame(root, payload);
+          else if (action === 'set-stage') out = setStage(root, payload);
+          else if (action === 'run') out = startRun(root, payload);
+          else if (action === 'scan') out = scanAll(root);
+          else if (action === 'cancel') {
+            if (!running) return respond(400, { ok: false, error: '没有在跑的任务' });
+            out = { cancelled: running.id };
+            running.cancel();
+          } else return respond(400, { ok: false, error: `未知动作 "${action}"` });
+          publishSnapshot(root);
+          return respond(200, { ok: true, result: out });
+        } catch (error) {
+          // 业务错误（目录重名、路径越界、参数不全）回 200 + ok:false，
+          // 前端只读 ok 字段，不必区分 HTTP 码。
+          return respond(200, { ok: false, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    }), 'game-console: action route');
+  });
+
   ctx.inject(['commands'], (child) => {
     child.commands.register({
       name: 'game-console',
@@ -822,6 +964,11 @@ export function apply(ctx, config = {}) {
           }
           if (action === 'set-stage') {
             const out = setStage(root, payload);
+            publishSnapshot(root);
+            return { kind: 'success', text: JSON.stringify(out) };
+          }
+          if (action === 'create') {
+            const out = await createGame(root, payload);
             publishSnapshot(root);
             return { kind: 'success', text: JSON.stringify(out) };
           }

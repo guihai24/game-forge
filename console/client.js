@@ -165,6 +165,83 @@ window.__ModuleLoader__.load({
   border:1px dashed var(--dsw-alias-border-l3);border-radius:14px}
 .gc-empty-t{font-size:14px;font-weight:600;margin-bottom:6px}
 .gc-empty-d{font-size:12.5px;color:var(--dsw-alias-label-secondary)}
+
+/* ══════════ 新建游戏弹层 ══════════ */
+.gc-new{font:inherit;font-size:12px;font-weight:500;padding:6px 13px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--dsw-alias-brand-primary);background:var(--dsw-alias-brand-primary);color:#fff;
+  white-space:nowrap;transition:filter .12s}
+.gc-new:hover{filter:brightness(1.07)}
+
+.gc-mask{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;
+  padding:24px;background:rgba(16,19,23,.44)}
+.gc-modal{width:min(680px,100%);max-height:calc(100vh - 48px);display:flex;flex-direction:column;
+  background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:16px;
+  box-shadow:0 24px 64px rgba(0,0,0,.24);overflow:hidden}
+.gc-modal-hd{flex:none;display:flex;align-items:center;gap:10px;padding:16px 20px;
+  border-bottom:1px solid var(--dsw-alias-border-l2)}
+.gc-modal-hd h2{font-size:15px;font-weight:600;margin:0}
+.gc-modal-x{margin-left:auto;font:inherit;font-size:16px;line-height:1;padding:5px 9px;border-radius:7px;
+  border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;
+  transition:background-color .12s,color .12s}
+.gc-modal-x:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.gc-modal-bd{flex:1;overflow:auto;padding:18px 20px;display:flex;flex-direction:column;gap:14px}
+.gc-modal-ft{flex:none;display:flex;align-items:center;gap:10px;padding:14px 20px;
+  border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1)}
+
+.gc-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.gc-row.one{grid-template-columns:1fr}
+.gc-row.tri{grid-template-columns:1fr 1fr 1fr}
+.gc-field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.gc-field>label{font-size:12px;font-weight:500;color:var(--dsw-alias-label-secondary)}
+.gc-field input,.gc-field select,.gc-field textarea{font:inherit;font-size:13px;
+  padding:7px 10px;border-radius:8px;box-sizing:border-box;width:100%;
+  border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1);
+  color:var(--dsw-alias-label-primary);transition:border-color .12s}
+.gc-field input:hover,.gc-field select:hover,.gc-field textarea:hover{border-color:var(--dsw-alias-label-tertiary)}
+.gc-field textarea{resize:vertical;min-height:58px;line-height:1.6}
+.gc-note{font-size:11.5px;color:var(--dsw-alias-label-tertiary);line-height:1.5}
+.gc-note.bad{color:var(--dsw-alias-state-error-primary)}
+.gc-sec{font-size:11.5px;font-weight:600;color:var(--dsw-alias-label-tertiary);
+  letter-spacing:.04em;margin-top:4px}
+
+/* 结果：先给结论，再给依据 */
+.gc-result{display:flex;flex-direction:column;gap:16px}
+.gc-score{display:flex;align-items:baseline;gap:10px}
+.gc-score .n{font-size:34px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.gc-score .d{font-size:13px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.gc-g1bar{display:flex;gap:3px;margin-top:2px}
+.gc-g1bar span{flex:1;height:5px;border-radius:2px;background:var(--dsw-alias-border-l3);opacity:.45}
+.gc-g1bar span.on{background:var(--dsw-alias-brand-primary);opacity:1}
+.gc-g1bar.is-drop span.on{background:var(--dsw-alias-state-warn-primary)}
+.gc-concl{font-size:13px;line-height:1.6}
+.gc-concl.good{color:var(--dsw-alias-state-success-primary)}
+.gc-concl.weak{color:var(--dsw-alias-state-warn-primary)}
+.gc-concl.bad{color:var(--dsw-alias-state-error-primary)}
+.gc-reason{display:flex;gap:10px;font-size:12.5px;line-height:1.55;padding:9px 11px;border-radius:9px;
+  border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1)}
+/* 轻重只用小圆点标记区分，不与卡片边框叠加 */
+.gc-reason .mk{flex:none;width:6px;height:6px;border-radius:50%;margin-top:6px;
+  background:var(--dsw-alias-label-tertiary)}
+.gc-reason.miss .mk{background:var(--dsw-alias-state-error-primary)}
+.gc-reason.need .mk{background:var(--dsw-alias-border-l3)}
+.gc-group{display:flex;flex-direction:column;gap:8px}
+.gc-group-hd{font-size:11.5px;font-weight:600;color:var(--dsw-alias-label-tertiary);letter-spacing:.02em}
+.gc-reason .id{flex:none;font-size:11px;color:var(--dsw-alias-label-tertiary);
+  font-family:ui-monospace,monospace;padding-top:1px;min-width:38px}
+.gc-reason .lb{font-weight:500}
+.gc-reason .dt{color:var(--dsw-alias-label-secondary);margin-top:2px}
+.gc-path{font-size:11.5px;font-family:ui-monospace,monospace;color:var(--dsw-alias-label-tertiary);
+  word-break:break-all}
+.gc-nextbox{font-size:12.5px;line-height:1.65;color:var(--dsw-alias-label-secondary);
+  padding:11px 13px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2);
+  background:var(--dsw-alias-bg-layer-1)}
+
+@media (max-width:720px){
+  .gc-row,.gc-row.tri{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  .gc-root *{transition:none!important;animation:none!important}
+}
 `;
 
     /* ---------- 取数 ---------- */
@@ -199,6 +276,12 @@ window.__ModuleLoader__.load({
     /* ---------- 主组件 ---------- */
     function ConsolePanel(props) {
       const [state, setState] = useState({ loading: true, games: [], tasks: [], error: null });
+      // 新建游戏弹层：null = 关闭，对象 = 正在编辑的表单
+      const [draft, setDraft] = useState(null);
+      // 新建后的自审结果：落盘成功但还没关弹层时显示
+      const [created, setCreated] = useState(null);
+      const [creating, setCreating] = useState(false);
+      const [createErr, setCreateErr] = useState('');
 
       // 读快照文件，不走命令通道。
       //
@@ -285,6 +368,57 @@ window.__ModuleLoader__.load({
         await callCommand(`/game-console archive ${JSON.stringify({ project, reason })}`);
       }, [callCommand]);
 
+      const openDraft = useCallback(() => {
+        setCreated(null);
+        setCreateErr('');
+        setDraft({
+          title: '', slug: '', genre: '', notes: '',
+          target: 'wechat', orientation: 'landscape',
+          duration: 60, hearts: 3,
+          offline: true, iap: false, share: '',
+          pace: '', emotion_theme: '',
+          trend_evidence: '', trend_direction: ''
+        });
+      }, []);
+
+      const closeDraft = useCallback(() => {
+        setDraft(null);
+        setCreated(null);
+        setCreateErr('');
+      }, []);
+
+      const patchDraft = useCallback((patch) => {
+        setDraft((d) => (d ? { ...d, ...patch } : d));
+      }, []);
+
+      const submitDraft = useCallback(async () => {
+        if (!draft || creating) return;
+        setCreating(true);
+        setCreateErr('');
+        try {
+          if (!props.runCommand) throw new Error('命令通道不可用：请先在左侧打开一个会话');
+          const res = await props.runCommand(`/game-console create ${JSON.stringify(draft)}`);
+          if (!res || !res.ok) throw new Error((res && res.text) || '新建失败');
+          let out = null;
+          try { out = JSON.parse(res.text); } catch (e) { out = null; }
+          if (!out) throw new Error(`服务端返回无法解析：${String(res.text).slice(0, 200)}`);
+          setCreated(out);
+          await load();
+        } catch (error) {
+          setCreateErr(String((error && error.message) || error));
+        } finally {
+          setCreating(false);
+        }
+      }, [draft, creating, props.runCommand, load]);
+
+      // Esc 关弹层。只在弹层打开时挂监听，避免常驻抢键。
+      useEffect(() => {
+        if (!draft) return undefined;
+        const onKey = (e) => { if (e.key === 'Escape') closeDraft(); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [draft, closeDraft]);
+
       const stats = useMemo(() => {
         const games = Array.isArray(state.games) ? state.games : [];
         const live = games.filter((g) => Object.values(g.state.channels || {}).some(
@@ -324,6 +458,10 @@ window.__ModuleLoader__.load({
           h('span', { className: 'gc-grow' }),
           stats.tasks > 0 && h('span', { className: 'gc-todo-pill' },
             `${stats.tasks} 项待处理`),
+          h('button', {
+            className: 'gc-new',
+            onClick: () => { setCreated(null); setDraft({ title: '', slug: '', genre: '', target: 'wechat', duration: 60, hearts: 3, offline: true, iap: false, share: '', pace: '', emotion_theme: '', trend_evidence: '', trend_direction: '', notes: '', orientation: 'landscape' }); }
+          }, '+ 新建游戏'),
           h('button', { className: 'gc-btn gc-btn-icon', onClick: load, title: '刷新', 'aria-label': '刷新' }, '⟳')
         ),
         h('div', { className: 'gc-scroll' },
@@ -460,8 +598,306 @@ window.__ModuleLoader__.load({
             h('br'),
             '人脸、备案短信、微信提审、建广告位这些永远要人做，平台只管把它们列出来，不假装能代办。'
           )
+        ),
+
+        draft && renderDraft({
+          draft,
+          created,
+          creating,
+          createErr,
+          closeDraft,
+          submitDraft,
+          patchDraft,
+          // 「改一下再试」：留着刚填的值回表单，方便补缺项
+          back: () => { setCreated(null); setCreateErr(''); },
+          // 「再建一个」：清掉这一款的身份字段，结构选项（时长/生命/方向）留着沿用
+          reset: () => {
+            setCreated(null);
+            setCreateErr('');
+            setDraft((d) => (d ? {
+              ...d,
+              title: '', slug: '', genre: '', notes: '',
+              share: '', emotion_theme: '',
+              trend_evidence: '', trend_direction: ''
+            } : d));
+          }
+        })
+      );
+    }
+
+    /* ---------- 新建游戏弹层 ---------- */
+    // 弹层里的两部分：填表 → 自审结论。
+    // 结论必须先于落盘后的下一步动作出现，否则用户建完一只眼睛不知道
+    // "这游戏值不值得做"，还得自己回去翻 brief。
+    //
+    // 这些函数放在 ConsolePanel 外面，靠 o 参数拿 state——
+    // 组件里的 useState 在这里不可见。
+    function renderDraft(o) {
+      const d = o.draft;
+      const autoSlug = slugPreview(d.slug || d.title);
+      const result = o.created;
+      return h('div', {
+        className: 'gc-mask',
+        onClick: (e) => { if (e.target === e.currentTarget) o.closeDraft(); }
+      },
+        h('div', { className: 'gc-modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'gc-modal-title' },
+          h('div', { className: 'gc-modal-hd' },
+            h('h2', { id: 'gc-modal-title' }, result ? '自审结果' : '新建游戏'),
+            !result && h('span', { className: 'gc-sub' }, '先过需求阶段的合规 + 爆款基因两道关'),
+            h('button', { className: 'gc-modal-x', onClick: o.closeDraft, 'aria-label': '关闭弹层' }, '✕')
+          ),
+
+          h('div', { className: 'gc-modal-bd' },
+            result ? renderResult(result) : renderForm(o, d, autoSlug)
+          ),
+
+          h('div', { className: 'gc-modal-ft' },
+            result
+              ? [
+                h('button', { className: 'gc-btn', onClick: o.closeDraft, key: 'close' }, '关闭'),
+                h('span', { className: 'gc-grow', key: 'g' }),
+                h('button', { className: 'gc-btn', onClick: o.back, key: 'back' }, '改一下再试'),
+                h('button', { className: 'gc-new', key: 'again', onClick: o.reset }, '再建一个')
+              ]
+              : [
+                o.createErr && h('span', { className: 'gc-note bad', style: { flex: 1 } }, o.createErr),
+                !o.createErr && h('span', { className: 'gc-note', style: { flex: 1 } }, '只会生成 game.brief.json，不会生成游戏代码'),
+                h('button', { className: 'gc-btn', onClick: o.closeDraft, disabled: o.creating, key: 'cancel' }, '取消'),
+                h('button', {
+                  className: 'gc-new', key: 'ok',
+                  disabled: o.creating || !String(d.title || '').trim(),
+                  onClick: o.submitDraft
+                }, o.creating ? '创建中…' : '创建并自审')
+              ]
+          )
         )
       );
+    }
+
+    function renderForm(o, d, autoSlug) {
+      const f = (key, label, node, hint) => h('div', { className: 'gc-field' },
+        h('label', { htmlFor: `gc-f-${key}` }, label),
+        node,
+        hint && h('span', { className: 'gc-note' }, hint)
+      );
+      const patch = o.patchDraft;
+      const input = (key, extra) => h('input', {
+        id: `gc-f-${key}`,
+        value: d[key] === undefined || d[key] === null ? '' : String(d[key]),
+        onChange: (e) => patch({ [key]: e.target.value }),
+        ...(extra || {})
+      });
+      const select = (key, options, coerce) => h('select', {
+        id: `gc-f-${key}`,
+        value: d[key] === undefined || d[key] === null ? '' : String(d[key]),
+        onChange: (e) => patch({ [key]: coerce ? coerce(e.target.value) : e.target.value })
+      }, options.map((op) => h('option', { value: op.v, key: op.v }, op.t)));
+      const bool = (v) => v === 'true';
+
+      const notesLen = String(d.notes || '').length;
+
+      return h('div', { className: 'gc-result' },
+
+        h('div', { className: 'gc-row' },
+          f('title', '游戏名',
+            input('title', { placeholder: '潮汐逃亡', autoFocus: true }),
+            '会写进 brief.title，也显示在看板上'),
+          f('slug', '目录名',
+            input('slug', { placeholder: autoSlug || 'tide-escape' }),
+            d.slug
+              ? `games/${autoSlug || '…'}`
+              : (autoSlug ? `留空则用 games/${autoSlug}` : '中文名生成不出目录名，必须手填，用小写字母/数字/连字符'))
+        ),
+
+        h('div', { className: 'gc-row' },
+          f('genre', '玩法类型',
+            input('genre', { placeholder: '解压躲避' }),
+            '品类决定单局时长该在什么区间'),
+          f('pace', '节奏',
+            select('pace', [
+              { v: '', t: '不填（按品类推断）' },
+              { v: 'twitch', t: 'twitch · 10–90 秒' },
+              { v: 'midcore', t: 'midcore · 60–180 秒' },
+              { v: 'strategy', t: 'strategy · 180–480 秒' }
+            ]),
+            '填了就以它为准，不再靠品类猜')
+        ),
+
+        f('notes', '一句话规则',
+          h('textarea', {
+            id: 'gc-f-notes',
+            value: String(d.notes || ''),
+            placeholder: '按住拖动躲开障碍，吃到贝壳加分，撞三次结束',
+            onChange: (e) => patch({ notes: e.target.value })
+          }),
+          notesLen > 120
+            ? h('span', { className: 'gc-note bad' }, `${notesLen} 字，超过 120 字会被判「规则说不清」`)
+            : `${notesLen}/120 —— 这一项同时决定 VD-01 和 VD-03（描述里要能看出操作有反馈）`
+        ),
+
+        h('div', { className: 'gc-row tri' },
+          f('duration', '单局秒数',
+            input('duration', { type: 'number', min: 5, max: 1200 }),
+            null),
+          f('hearts', '初始生命',
+            input('hearts', { type: 'number', min: 1, max: 9 }),
+            null),
+          f('orientation', '屏幕方向',
+            select('orientation', [
+              { v: 'landscape', t: '横屏' },
+              { v: 'portrait', t: '竖屏' }
+            ]),
+            null)
+        ),
+
+        h('div', { className: 'gc-row' },
+          f('offline', '变现',
+            select('offline', [
+              { v: 'true', t: '单机（纯广告）' },
+              { v: 'false', t: '联网' }
+            ], bool),
+            '单机才能走纯广告变现；联网要额外的服务端'),
+          f('share', '分享机制',
+            input('share', { placeholder: 'leaderboard / 邀请组队 / 留空' }),
+            '留空且规则里也没提分享，VD-05 直接判未过')
+        ),
+
+        h('div', { className: 'gc-row' },
+          f('emotion_theme', '情绪主题',
+            input('emotion_theme', { placeholder: '紧张后放松、收集满足感' }),
+            '人工项，机器不判'),
+          f('trend_direction', '趋势方向',
+            select('trend_direction', [
+              { v: '', t: '未判断' },
+              { v: 'positive', t: '正向 · 有窗口期' },
+              { v: 'negative', t: '负向 · 没窗口期（直接砍线）' }
+            ]),
+            '不填会一直提示补，机器不猜方向')
+        ),
+
+        f('trend_evidence', '趋势依据',
+          h('textarea', {
+            id: 'gc-f-trend_evidence',
+            value: String(d.trend_evidence || ''),
+            placeholder: '例：2026-11 微信小游戏畅销 Top10 里没有本品类，同类最近一次进榜是 8 月',
+            onChange: (e) => patch({ trend_evidence: e.target.value })
+          }),
+          '至少 10 个字才算有效证据。写负向结论就把上面方向选成「负向」'
+        ),
+
+        h('div', { className: 'gc-field' },
+          h('label', null, '含内购'),
+          h('select', {
+            id: 'gc-f-iap',
+            value: d.iap ? 'true' : 'false',
+            onChange: (e) => patch({ iap: bool(e.target.value) })
+          },
+            h('option', { value: 'false' }, '否'),
+            h('option', { value: 'true' }, '是')
+          ),
+          d.iap && h('span', { className: 'gc-note bad' }, '个人主体拿不到版号，含内购会被合规直接阻断')
+        )
+      );
+    }
+
+    function renderResult(r) {
+      const v = r.viral || {};
+      const a = r.audit || null;
+      const drop = v.verdict === 'suggest-drop';
+      const total = Number(v.total) || 8;
+      const score = Number(v.score) || 0;
+      const blocks = a ? (a.items || []).filter((i) => i.level === 'BLOCK') : [];
+      const warns = a ? (a.items || []).filter((i) => i.level === 'WARN') : [];
+      // 只列真正没过的。人工项单独归一堆，别混进"机器判你不过"里。
+      const auto = (v.failed || []).filter((i) => !i.needsHuman);
+      const human = (v.failed || []).filter((i) => i.needsHuman);
+
+      let concl = '可以往下做：需求阶段两道关都过';
+      let tone = 'good';
+      if (v.error) { concl = `自审没跑起来：${v.error}（brief 已落盘，可以手动补）`; tone = 'bad'; }
+      else if (blocks.length) { concl = `不能做：有 ${blocks.length} 项合规阻断，改需求再来`; tone = 'bad'; }
+      else if (drop) { concl = '建议别做：爆款基因没过砍线，做了大概率白烧时间'; tone = 'weak'; }
+      else if (auto.length) { concl = `可以做，但先补 ${auto.length} 项；还没到砍线`; tone = 'weak'; }
+      else if (v.needsDirection) { concl = '可以做，但趋势方向没标，机器没法定砍线'; tone = 'weak'; }
+
+      return h('div', { className: 'gc-result' },
+
+        h('div', null,
+          h('div', { className: 'gc-card-sub', style: { marginBottom: 8 } },
+            r.brief && r.brief.title ? r.brief.title : r.project),
+          h('div', { className: 'gc-score' },
+            h('span', { className: 'n' }, v.error ? '—' : `${score}`),
+            h('span', { className: 'd' }, v.error ? '' : `/ ${total} 条基因`),
+            !v.error && h('span', {
+              className: `gc-badge2 ${drop ? 'warn' : 'ok'}`,
+              style: { position: 'static', marginLeft: 6 }
+            }, drop ? 'suggest-drop' : 'proceed')
+          ),
+          !v.error && h('div', { className: `gc-g1bar ${drop ? 'is-drop' : ''}`, style: { marginTop: 10 } },
+            Array.from({ length: total }).map((_, i) => h('span', { key: i, className: i < score ? 'on' : '' }))
+          )
+        ),
+
+        h('div', { className: `gc-concl ${tone}` }, concl),
+
+        blocks.length > 0 && h('div', { className: 'gc-group' },
+          h('div', { className: 'gc-group-hd' }, '合规阻断'),
+          blocks.map((b, i) => h('div', { className: 'gc-reason miss', key: `b${i}` },
+            h('span', { className: 'mk', 'aria-hidden': 'true' }),
+            h('span', { className: 'id' }, String(b.id || '').slice(0, 12)),
+            h('div', null,
+              h('div', { className: 'lb' }, b.msg),
+              b.hint && h('div', { className: 'dt' }, b.hint)
+            )
+          ))
+        ),
+
+        auto.length > 0 && h('div', { className: 'gc-group' },
+          h('div', { className: 'gc-group-hd' }, `机器判不过 · ${auto.length} 项`),
+          auto.map((it, i) => h('div', { className: 'gc-reason miss', key: `a${i}` },
+            h('span', { className: 'mk', 'aria-hidden': 'true' }),
+            h('span', { className: 'id' }, it.id),
+            h('div', null,
+              h('div', { className: 'lb' }, it.label),
+              it.detail && h('div', { className: 'dt' }, it.detail)
+            )
+          ))
+        ),
+
+        human.length > 0 && h('div', { className: 'gc-group' },
+          h('div', { className: 'gc-group-hd' }, `需你自己确认 · ${human.length} 项（不计入砍线）`),
+          human.map((it, i) => h('div', { className: 'gc-reason need', key: `h${i}` },
+            h('span', { className: 'mk', 'aria-hidden': 'true' }),
+            h('span', { className: 'id' }, it.id),
+            h('div', null,
+              h('div', { className: 'lb' }, it.label),
+              it.detail && h('div', { className: 'dt' }, it.detail)
+            )
+          ))
+        ),
+
+        warns.length > 0 && h('div', { className: 'gc-note' },
+          `另有 ${warns.length} 条合规提醒，不阻断，构建前会再列一次。`),
+
+        h('div', { className: 'gc-nextbox' },
+          h('div', { style: { fontWeight: 500, color: 'var(--dsw-alias-label-primary)', marginBottom: 4 } },
+            '下一步'),
+          drop || blocks.length
+            ? '点「改一下再试」补上缺的字段，退回表单重新自审。不想做就点「关闭」，把目录删掉，别让它占位。'
+            : `去对话里让 Game Studio 按 ${r.project}/game.brief.json 生成游戏，生成完回看板点「构建」。`,
+          h('div', { className: 'gc-path', style: { marginTop: 8 } }, r.project)
+        )
+      );
+    }
+
+    /** 目录名预览：与服务端 slugify 保持一致。中文会得到空串——这是有意的，
+     *  让用户看见"生成不出来"而不是悄悄变成 games/game-1。 */
+    function slugPreview(s) {
+      return String(s || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40);
     }
 
     /* ---------- 注册 ---------- */
@@ -575,28 +1011,53 @@ window.__ModuleLoader__.load({
         }
       };
 
-      /** 往会话发一条 /game-console 命令，返回 { ok, text }。 */
-      const execute = async (line) => {
+      /**
+       * 面板动作：POST /api/game-console，不走命令通道。
+       *
+       * 曾经走 ctx.remote.commands.execute(会话ID, ...)，但那条路要求会话归本实例
+       * 所有。桌面应用和 web 实例共享 ~/.dsh，侧栏里能看见对方的会话——一旦面板
+       * 绑到对方持有的会话，任何写操作都直接报
+       *   session "..." is already owned by an active write handle
+       * 新建、归档、构建都不需要会话，只读写工作区文件，所以走这条独立路由。
+       * 该路由注册在宿主的鉴权栅栏内，鉴权由连接服务负责。
+       *
+       * 返回 { ok, text }，text 与旧的命令返回一致，调用方不用改。
+       */
+      const callApi = async (action, payload) => {
         try {
-          const sid = currentSessionId(ctx);
-          if (!sid) return { ok: false, text: '没有打开中的会话：先在左侧打开一个会话' };
-          const result = await ctx.remote.commands.execute(sid, line, []);
-          if (!result || !result.ok) {
-            return { ok: false, text: (result && result.error && result.error.message) || '命令执行失败' };
+          const res = await fetch('/api/game-console', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action, payload: payload || {} }),
+            cache: 'no-store'
+          });
+          if (!res || !res.ok) {
+            let msg = `请求失败（HTTP ${res ? res.status : '?'}）`;
+            try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (e) { /* 用默认文案 */ }
+            return { ok: false, text: msg };
           }
-          const value = result.value && result.value.result !== undefined ? result.value.result : result.value;
-          if (value === undefined) return { ok: false, text: '命令在当前会话不可用' };
-          return { ok: value.kind === 'success', text: String(value.text !== undefined ? value.text : '') };
+          const body = await res.json();
+          if (!body || body.ok === false) return { ok: false, text: (body && body.error) || '执行失败' };
+          return { ok: true, text: JSON.stringify(body.result) };
         } catch (error) {
           return { ok: false, text: error instanceof Error ? error.message : String(error) };
         }
       };
 
-      const runBuild = (project, target, action) =>
-        execute(`/game-console run ${JSON.stringify({ project, target, action: action || 'build' })}`);
+      const runBuildFor = () => (project, target, action) =>
+        callApi('run', { project, target, action: action || 'build' });
 
-      /** 任意 /game-console 子命令（归档、恢复等）。 */
-      const runCommand = (line) => execute(line);
+      /** 任意面板动作（新建、归档、改阶段）。保留 `/game-console <action> {json}` 的调用形态。 */
+      const runCommandFor = () => (line) => {
+        const s = String(line || '').trim();
+        const m = /^\/game-console\s+(\S+)\s*([\s\S]*)$/.exec(s);
+        if (!m) return Promise.resolve({ ok: false, text: '无法解析的动作' });
+        let payload = {};
+        if (m[2]) {
+          try { payload = JSON.parse(m[2]); } catch (e) { return Promise.resolve({ ok: false, text: '动作参数不是合法 JSON' }); }
+        }
+        return callApi(m[1], payload);
+      };
 
       function currentSessionId(c) {
         try {
@@ -619,8 +1080,8 @@ window.__ModuleLoader__.load({
             consoleSessionId: typeof sessionId === 'string' ? sessionId : '',
             readFile: (rel) => readFile(sessionId, rel),
             readGlobal,
-            runBuild,
-            runCommand,
+            runBuild: runBuildFor(),
+            runCommand: runCommandFor(),
             coverTone
           })
         }, ConsolePanel);
