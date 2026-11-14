@@ -216,14 +216,28 @@ export function scoreBrief(brief, known) {
     manual: false
   });
 
-  // VD-08 时间窗口：看 trend_evidence 是否给了"势"的依据。
-  const trendOk = String(b.trend_evidence || '').trim().length >= 10;
+  // VD-08 时间窗口：trend_evidence 要写出「势」的依据。
+  //
+  // 只看长度是不够的：写「本品类当前无窗口期」也有 200 字，但那恰恰说明不该做。
+  // 所以分两件事判：
+  //   - 有没有写（没写 = 没想过，判否）
+  //   - 写的是正向还是负向（负向结论一样有价值，但要把 verdict 引到"别做"）
+  const te = String(b.trend_evidence || '').trim();
+  const NEGATIVE = /无窗口期|没有窗口|不建议|不宜|下行|萎缩|已饱和|接盘|不占势|未进榜|没有机会/;
+  const hasTrend = te.length >= 10;
+  const negative = hasTrend && NEGATIVE.test(te);
   items.push({
     id: 'VD-08',
-    ok: trendOk,
+    ok: hasTrend,
     label: '时间窗口',
-    detail: trendOk ? `trend_evidence: ${String(b.trend_evidence).slice(0, 60)}` : 'brief 没写 trend_evidence（凭什么现在是这个题材的窗口期）',
-    manual: false
+    detail: !hasTrend
+      ? 'brief 没写 trend_evidence（凭什么现在是这个题材的窗口期）'
+      : negative
+        ? `已写，但结论是负向：${te.slice(0, 70)}…（依据充分，所以本项通过；但它说明不该做）`
+        : `trend_evidence: ${te.slice(0, 60)}`,
+    manual: false,
+    // 负向依据：项算通过（你确实做了判断），但要单独标出来影响总评
+    negative
   });
 
   const passed = items.filter((i) => i.ok).length;
@@ -232,7 +246,11 @@ export function scoreBrief(brief, known) {
   const autoFailed = failed.filter((i) => !i.needsHuman && !i.unmeasured);
   const human = failed.filter((i) => i.needsHuman);
   const unmeasured = failed.filter((i) => !i.needsHuman && i.unmeasured);
+  // 负向依据：项本身通过（你做了判断），但结论就是「不该做」。
+  // 这不该被"缺 2 条"的计数掩盖——证据说没势，比缺两条基因更该砍。
+  const negativeTrend = items.filter((i) => i.id === 'VD-08' && i.ok && i.negative);
 
+  const drop = autoFailed.length >= 2 || negativeTrend.length > 0;
   return {
     score: passed,
     total: items.length,
@@ -244,11 +262,14 @@ export function scoreBrief(brief, known) {
     autoJudged: items.length - human.length,
     humanCount: human.length,
     unmeasuredCount: unmeasured.length,
-    verdict: autoFailed.length >= 2 ? 'suggest-drop' : 'proceed',
-    note: autoFailed.length >= 2
-      ? `${autoFailed.length} 项自动判定未过（${autoFailed.map((i) => i.label).join('、')}），按规则建议别做`
-      : autoFailed.length === 1
-        ? `1 项自动判定未过（${autoFailed[0].label}），未触及"缺 2 条"的砍线`
+    negativeTrend: negativeTrend.length > 0,
+    verdict: drop ? 'suggest-drop' : 'proceed',
+    note: negativeTrend.length
+      ? 'trend_evidence 的结论是负向（当前没有窗口期）——按规则建议别做'
+      : autoFailed.length >= 2
+        ? `${autoFailed.length} 项自动判定未过（${autoFailed.map((i) => i.label).join('、')}），按规则建议别做`
+        : autoFailed.length === 1
+          ? `1 项自动判定未过（${autoFailed[0].label}），未触及"缺 2 条"的砍线`
         : '自动判定全部通过'
   };
 }
@@ -320,12 +341,17 @@ export function reconcileGates(gate1, gate2Items) {
     unmeasuredCount: unmeasured.length,
     overridden,
     reconciled: true,
-    verdict: autoFailed.length >= 2 ? 'suggest-drop' : 'proceed',
-    note: autoFailed.length >= 2
-      ? `${autoFailed.length} 项自动判定未过（${autoFailed.map((i) => i.label).join('、')}），按规则建议别做`
-      : autoFailed.length === 1
-        ? `1 项自动判定未过（${autoFailed[0].label}），未触及"缺 2 条"的砍线`
-        : '自动判定全部通过'
+    // 负向趋势依据与"缺 2 条"一样触发砍线，不能被实测修正掩盖
+    negativeTrend: Boolean(gate1.negativeTrend) || items.some((i) => i.id === 'VD-08' && i.ok && i.negative),
+    verdict: (autoFailed.length >= 2 || gate1.negativeTrend || items.some((i) => i.id === 'VD-08' && i.ok && i.negative))
+      ? 'suggest-drop' : 'proceed',
+    note: (gate1.negativeTrend || items.some((i) => i.id === 'VD-08' && i.ok && i.negative))
+      ? 'trend_evidence 的结论是负向（当前没有窗口期）——按规则建议别做'
+      : autoFailed.length >= 2
+        ? `${autoFailed.length} 项自动判定未过（${autoFailed.map((i) => i.label).join('、')}），按规则建议别做`
+        : autoFailed.length === 1
+          ? `1 项自动判定未过（${autoFailed[0].label}），未触及"缺 2 条"的砍线`
+          : '自动判定全部通过'
   };
 }
 

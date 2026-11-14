@@ -187,7 +187,10 @@ function collectTasks(games) {
         id: `${g.project}:viral:drop`,
         kind: 'viral-drop',
         title: `${g.state.title} · 基因 ${v.score}/${v.total}，建议砍掉`,
-        detail: `未过：${missing.join('、') || '—'}。砍线只算能机器判的项，人工项另需确认。规则见 viral-dna-rules.md`,
+        // 负向趋势依据优先级最高：它说明的不是"缺基因"，而是"这个品类现在不该做"
+        detail: v.negativeTrend
+          ? `trend_evidence 的结论是负向：当前没有窗口期。这条比缺基因更硬——依据充分说明不该做。见 references/research/2026-11-14-viral-window.md`
+          : `未过：${missing.join('、') || '—'}。砍线只算能机器判的项，人工项另需确认。规则见 viral-dna-rules.md`,
         project: g.project,
         title_game: g.state.title,
         createdAt: new Date().toISOString()
@@ -337,6 +340,7 @@ function scanAll(root) {
           note: gate1.note,
           // 有实测修正时，分数和"从 brief 静态推测"不是一回事，界面要说清楚
           reconciled: Boolean(gate1.reconciled),
+          negativeTrend: Boolean(gate1.negativeTrend),
           overridden: (gate1.overridden || []).map((i) => ({ id: i.id, label: i.label, by: i.overriddenBy, detail: i.detail })),
           failed: gate1.failed.map((i) => ({
             id: i.id,
