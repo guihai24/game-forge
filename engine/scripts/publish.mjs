@@ -235,13 +235,24 @@ async function precheckGate(game) {
   let report = null;
   let gate1 = null;
   try {
-    const { makeReport, checkBrief } = await import('./precheck-lib.mjs');
+    const { makeReport, checkBrief, checkSubmit } = await import('./precheck-lib.mjs');
     const { scoreBrief } = await import('./viral-dna-lib.mjs');
     const brief = JSON.parse(fs.readFileSync(briefPath, 'utf8'));
+    const channel = brief.target === 'wechat' ? 'wechat' : 'taptap';
     report = makeReport();
-    checkBrief(brief, brief.target === 'wechat' ? 'wechat' : 'taptap', report);
+    checkBrief(brief, channel, report);
+
+    // 首次构建时 game.js 还没生成，跨游戏比对没有意义（也比不出东西）。
+    // 一旦已有产物，就把 checkSubmit 也跑上：换皮 BLOCK 必须在构建时就拦，
+    // 而不是拖到打包才报——那时已经白构建了一遍。
+    const hasCode = fs.existsSync(path.join(game, 'game.js'));
+    if (hasCode) {
+      checkSubmit(game, channel, report);
+    }
+
     const st = (() => { try { return JSON.parse(fs.readFileSync(path.join(game, '.forge', 'state.json'), 'utf8')); } catch (e) { return {}; } })();
     gate1 = scoreBrief(brief, { offline: st.offline === true, iap: st.iap === true });
+    report._submitChecked = hasCode;
   } catch (e) {
     // 自审自身出错不该挡构建——它是辅助，不是依赖
     console.log(`  ⚠ 构建前置自审没跑起来：${e.message}`);
@@ -250,7 +261,7 @@ async function precheckGate(game) {
 
   const blocks = report.blocked;
   if (blocks.length) {
-    console.error('\n✗ 构建前置自审未通过（合规红线）：');
+    console.error(`\n✗ 构建前置自审未通过（合规红线${report._submitChecked ? '，含跨游戏同质化比对' : ''}）：`);
     for (const b of blocks) console.error(`    ✗ ${b.msg}`);
     console.error('  这些问题不改，做出来也上不了架。用 --no-check 可强行跳过。\n');
     process.exit(4);

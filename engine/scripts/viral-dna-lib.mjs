@@ -34,15 +34,75 @@ const ROUND_SECONDS = {
   strategy: { min: 180, max: 480, label: '3–8 分钟' }
 };
 
+/* 品类 → 节奏档的匹配表。
+ *
+ * 旧实现用三条正则按顺序 try，先命中的赢。问题是词根会重叠：
+ * collect-and-dodge 里 dodge 属于 twitch、collect 属于 midcore，
+ * 谁先谁后决定了结论——这是实现顺序在冒充品类判断。
+ *
+ * 现在改成表驱动 + 打分：每个词根属于哪个档、权重多少都写清楚，
+ * 命中多个时按总分最高的档。这样 collect-and-dodge 会同时命中
+ * dodge(twitch) 和 collect(midcore)，按权重决出，而不是按代码行号。
+ */
+const PACE_LEXICON = {
+  twitch: [
+    { re: /twitch|flappy/i, w: 3 },
+    { re: /runner|reflex|tap-?game/i, w: 3 },
+    { re: /dodge|jump|dash/i, w: 2 },
+    { re: /click/i, w: 2 },
+    { re: /躲避|跳跃|反应|点击/i, w: 2 }
+  ],
+  midcore: [
+    { re: /collect/i, w: 3 },
+    { re: /arcade/i, w: 2 },
+    { re: /collect-and/i, w: 2 },   // 复合品类多给一分，倾向 midcore
+    { re: /收集/i, w: 2 }
+  ],
+  strategy: [
+    { re: /merge|match-?3|match3/i, w: 3 },
+    { re: /puzzle|tycoon|tower-?defense|idle|sim|strategy|rpg|card/i, w: 3 },
+    { re: /消除|合成|三消|塔防|经营|放置|策略|卡牌/i, w: 3 }
+  ]
+};
+
+/**
+ * 从 genre 推断节奏档。命中多个档时按加权总分取最高；同分时取更"长"的档
+ * （长局档通常意味着更具体的玩法描述），并返回候选供排查。
+ * @returns { pace, scores, candidates } —— 认不出来 pace 为 null。
+ */
+export function paceDetail(brief) {
+  const b = brief || {};
+  if (ROUND_SECONDS[b.pace]) return { pace: b.pace, scores: { [b.pace]: 99 }, candidates: [], source: 'brief.pace' };
+
+  const g = String(b.genre || '');
+  if (!g) return { pace: null, scores: {}, candidates: [], source: 'none' };
+
+  const scores = {};
+  const hits = [];
+  for (const [pace, rules] of Object.entries(PACE_LEXICON)) {
+    for (const { re, w } of rules) {
+      if (re.test(g)) {
+        scores[pace] = (scores[pace] || 0) + w;
+        hits.push({ pace, pattern: String(re), weight: w });
+      }
+    }
+  }
+
+  const entries = Object.entries(scores).sort((a, z) => z[1] - a[1]);
+  if (!entries.length) return { pace: null, scores, candidates: [], source: 'no-match' };
+
+  // 同分时取更长（更具体）的档：twitch 最短、strategy 最长
+  const order = ['twitch', 'midcore', 'strategy'];
+  const top = entries[0][1];
+  const tied = entries.filter(([, s]) => s === top).map(([p]) => p);
+  const pace = tied.sort((a, z) => order.indexOf(z) - order.indexOf(a))[0];
+
+  return { pace, scores, candidates: hits, source: 'genre' };
+}
+
 /** 从 genre 推断节奏档；认不出来就返回 null（不猜）。 */
 export function paceOf(brief) {
-  const b = brief || {};
-  if (ROUND_SECONDS[b.pace]) return b.pace;
-  const g = String(b.genre || '').toLowerCase();
-  if (/twitch|flappy|jump|dodge|runner|reflex|click|tap|躲避|跳跃|反应|点击/.test(g)) return 'twitch';
-  if (/merge|match3|puzzle|消除|合成|三消/.test(g)) return 'strategy';
-  if (/collect|dodge|arcade|collect-and|收集/.test(g)) return 'midcore';
-  return null;
+  return paceDetail(brief).pace;
 }
 
 /** 判单局时长是否落在该品类的合理区间。返回 { ok, range, note }。 */

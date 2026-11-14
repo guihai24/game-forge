@@ -44,6 +44,54 @@ function readJson(p) { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } ca
 
 /* ---------- 通用状态判定：不绑定某个品类 ---------- */
 
+/** 变化指纹：把状态压成一串稳定的字符串，用于和基线比较。
+ *
+ * 只取"结构性"字段，丢掉每帧都在变的裸数值（计时器、坐标、帧率）。
+ * 目的不是描述状态，而是回答"这次变化是不是离基线足够远"。
+ */
+function fingerprint(state, depth = 0) {
+  if (state === null || typeof state !== 'object') return String(state);
+  if (depth > 3) return '…';
+  const out = [];
+  for (const k of Object.keys(state).sort()) {
+    if (/^(fps|dt|delta|now|timestamp|frame|time|timeLeft|remaining|countdown|elapsed)$/i.test(k)) continue;
+    out.push(`${k}=${fingerprint(state[k], depth + 1)}`);
+  }
+  return `{${out.join(',')}}`;
+}
+
+/** 递归比较两个状态，收集所有变化的字段路径（相对基线）。 */
+function changedPaths(a, b, prefix = '', out = []) {
+  if (a === b) return out;
+  if (typeof a === 'number' && typeof b === 'number') {
+    if (Math.abs(a - b) > 0.01) out.push({ path: prefix || '(root)', delta: Math.abs(a - b), from: a, to: b });
+    return out;
+  }
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
+    if (a !== b) out.push({ path: prefix || '(root)', delta: Infinity, from: a, to: b });
+    return out;
+  }
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const k of keys) {
+    if (/^(fps|dt|delta|now|timestamp|frame)$/i.test(k)) continue;
+    changedPaths(a[k], b[k], prefix ? `${prefix}.${k}` : k, out);
+  }
+  return out;
+}
+
+/**
+ * 输入造成的反馈检测 —— 带基线的差分。
+ *
+ * 旧实现把"任意字段变化"当成反馈，但动态游戏里敌人一直在动、计时器一直在走，
+ * 不输入也会变化（实测 dawn-otter 无输入时 5/5 次采样都变）。
+ * 这样测出来的"31ms"实际是自主运动的相位，不是输入生效时间。
+ *
+ * 新做法：
+ *   1. 先在不输入的情况下连续采样，算出每 25ms 的"自主变化字段集合"作基线。
+ *   2. 再输入，看哪些字段变了、且不在基线里——那才是输入造成的。
+ *   3. 如果一个字段在基线里也变，但输入后变化幅度显著更大，也算（比如 hero 受输入驱动）。
+ */
+
 /** 从游戏状态里推断单局总时长（秒）。认不出来返回 null。 */
 export function pickRoundSeconds(state) {
   const s = state || {};
@@ -60,19 +108,66 @@ export function pickRoundSeconds(state) {
   return null;
 }
 
-/** 两个状态之间有没有发生可观测的变化。递归比较，忽略纯渲染字段。 */
-export function stateChanged(a, b, depth = 0) {
-  if (depth > 3) return false;
-  if (a === b) return false;
-  if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) > 0.01;
-  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return a !== b;
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-  for (const k of keys) {
-    // fps / 时间戳这类每帧都变的字段不算"反馈"
-    if (/^(fps|dt|delta|now|timestamp|frame)$/i.test(k)) continue;
-    if (stateChanged(a[k], b[k], depth + 1)) return true;
+/**
+ * 建自主运动基线：不输入，连续采样 intervalMs，记录每个字段的**变化速率**（幅度/毫秒）。
+ * @returns Map<字段路径, 每秒变化量> —— 基线里出现过的路径，说明它"自己会变"。
+ */
+export async function buildBaseline(readState, samples = 5, intervalMs = 25) {
+  const rate = new Map();
+  let prev = await readState();
+  const t0 = Date.now();
+  for (let i = 0; i < samples; i += 1) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    const cur = await readState();
+    if (!prev || !cur) break;
+    const span = Math.max(Date.now() - t0, 1);
+    for (const c of changedPaths(prev, cur)) {
+      const key = normalizePath(c.path);
+      const amp = Number.isFinite(c.delta) ? c.delta : 1;
+      // 变化速率：每毫秒变化多少。用速率而不是绝对幅度，
+      // 否则"输入后等了更久"会把自增计数器的正常增长误判成输入反馈。
+      rate.set(key, Math.max(rate.get(key) || 0, amp / span));
+    }
+    prev = cur;
   }
-  return false;
+  return rate;
+}
+
+/** 路径归一化：数组下标抹成 []，这样 enemies[0].x 和 enemies[3].x 算同一个字段。 */
+function normalizePath(p) {
+  return p.replace(/\[\d+\]/g, '[]');
+}
+
+/**
+ * 输入是否造成了超出基线的变化。
+ *
+ * 判据是**速率**而非绝对幅度：输入后经过 elapsedMs，某字段的变化速率
+ * 若显著高于基线速率（3 倍以上），才算输入驱动。这样：
+ *   - 自增计时器（基线里匀速增长）不会被误判
+ *   - 输入后立刻跳变的字段（hero.x / score）会被正确识别
+ *
+ * @param baseline buildBaseline 的结果（速率）
+ * @param before 输入前的状态
+ * @param after 输入后的状态
+ * @param elapsedMs 两次采样之间过了多久
+ */
+export function inputChanged(baseline, before, after, elapsedMs = 25) {
+  const interesting = [];
+  const span = Math.max(elapsedMs, 1);
+  for (const c of changedPaths(before, after)) {
+    const key = normalizePath(c.path);
+    const baseRate = baseline.get(key);
+    const amp = Number.isFinite(c.delta) ? c.delta : 1;
+    const thisRate = amp / span;
+    if (baseRate === undefined) {
+      // 基线里从没变过 → 这次变化只能是输入引起的
+      interesting.push(c.path);
+      continue;
+    }
+    // 基线里也在变：速率显著更高才算输入驱动
+    if (thisRate > Math.max(baseRate * 3, 0.1)) interesting.push(c.path);
+  }
+  return { changed: interesting.length > 0, paths: interesting };
 }
 
 function entryHtml(dir) {
@@ -157,23 +252,53 @@ async function probeRuntime(entry, orientation, seconds) {
     // 认不出来就报"未测"，不要拿别的字段硬套。
     out.roundSeconds = pickRoundSeconds(playing);
 
-    // VD-03b 反馈延迟：不依赖 hero 字段——任何可观测状态的变化都算反馈。
-    // 三消没有 hero，但 score / board / matched 会变；点击类 score 会变。
-    await page.mouse.move(cx, cy);
-    await page.mouse.down();
-    const before = await readState();
-    const tMove = Date.now();
+    // VD-03b 反馈延迟：先建"自主运动基线"，再测输入造成的增量。
+    // 旧做法把任意字段变化当反馈，但动态游戏不输入也会变（敌人移动、计时器走），
+    // 测出来的是自主运动的相位，不是输入生效时间。
+    const baseline = await buildBaseline(readState, 5, 25);
+    out.baselineFields = [...baseline.keys()];
+
+    // 输入方式要覆盖品类：拖拽（摇杆类）、点击（点击/三消类）、按键（跑酷类）。
+    // 只试拖拽的话，点击类游戏永远测不到反馈。
+    const probes = [
+      { name: '拖拽', run: async (onSample) => {
+        await page.mouse.move(cx, cy);
+        await page.mouse.down();
+        try { await onSample(async () => { await page.mouse.move(cx + 100, cy, { steps: 2 }); }); }
+        finally { await page.mouse.up(); }
+      } },
+      { name: '点击', run: async (onSample) => {
+        await onSample(async () => { await page.mouse.click(cx, cy); });
+      } },
+      { name: '按键', run: async (onSample) => {
+        await onSample(async () => { await page.keyboard.press('Space'); });
+      } }
+    ];
+
     let moved = null;
-    for (let i = 0; i < 40; i += 1) {
-      await page.mouse.move(cx + 100, cy, { steps: 2 });
-      const s = await readState();
-      if (s && before && stateChanged(before, s)) {
-        moved = Date.now() - tMove;
-        break;
-      }
-      await sleep(25);
+    let movedPaths = [];
+    let inputKind = '';
+    for (const probe of probes) {
+      if (Number.isFinite(moved)) break;
+      const before = await readState();
+      const tProbe = Date.now();
+      await probe.run(async (fire) => {
+        for (let i = 0; i < 12 && !Number.isFinite(moved); i += 1) {
+          await fire();
+          const s = await readState();
+          const res = s && before ? inputChanged(baseline, before, s, Date.now() - tProbe) : { changed: false };
+          if (res.changed) {
+            moved = Date.now() - tProbe;
+            movedPaths = res.paths;
+            inputKind = probe.name;
+          }
+          await sleep(25);
+        }
+      });
     }
     out.feedbackMs = moved;
+    out.feedbackPaths = movedPaths;
+    out.feedbackInput = inputKind;
 
     // 采样一段时间，确认稳定在 playing
     const steps = Math.max(6, Math.round((seconds * 1000) / 400));
@@ -272,7 +397,11 @@ export async function runProbe(dir, opts = {}) {
   // VD-03b 反馈延迟（重开 <2s 见下方单独一项）
   items.push(...verdict('VD-03b', 'WARN', '反馈延迟（实测）',
     rt && Number.isFinite(rt.feedbackMs) ? rt.feedbackMs <= 1000 : null,
-    rt && Number.isFinite(rt.feedbackMs) ? `操作→状态变化 ${rt.feedbackMs}ms` : '没测到反馈延迟（状态里没有任何可观测字段变化）',
+    rt && Number.isFinite(rt.feedbackMs)
+      ? `操作（${rt.feedbackInput || '输入'}）→状态变化 ${rt.feedbackMs}ms${rt.feedbackPaths && rt.feedbackPaths.length ? `（${rt.feedbackPaths.slice(0, 3).join('、')}）` : ''}`
+      : (rt && rt.baselineFields && rt.baselineFields.length
+        ? `没测到：输入没有造成超出自主运动基线的变化（基线里有 ${rt.baselineFields.length} 个字段一直自己在变）`
+        : '没测到反馈延迟（状态里没有任何可观测字段变化）'),
     '每次操作 1 秒内必须有可感知的反馈',
     Boolean(rt && Number.isFinite(rt.feedbackMs))));
 
