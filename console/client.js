@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'game-console';
     const NS = '@guihai24/dsh-game-console';
 
-    const inject = ['slots', 'locale', 'remote', 'remote.commands', 'sessions', 'resources'];
+    const inject = ['slots', 'locale', 'remote', 'remote.commands', 'sessions', 'resources', 'uiWorkspace'];
 
     /* ---------- 图标 ---------- */
     function PanelIcon(props) {
@@ -212,6 +212,10 @@ window.__ModuleLoader__.load({
 .gc-field textarea{resize:vertical;min-height:58px;line-height:1.6}
 .gc-note{font-size:11.5px;color:var(--dsw-alias-label-tertiary);line-height:1.5}
 .gc-note.bad{color:var(--dsw-alias-state-error-primary)}
+/* 弹层顶部：改的是哪一款、在哪个目录，一眼看住对象 */
+.gc-ident{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  padding-bottom:14px;border-bottom:1px solid var(--dsw-alias-border-l2)}
+.gc-ident-t{font-size:15px;font-weight:600}
 .gc-sec{font-size:11.5px;font-weight:600;color:var(--dsw-alias-label-tertiary);
   letter-spacing:.04em;margin-top:4px}
 
@@ -380,19 +384,45 @@ window.__ModuleLoader__.load({
         await callCommand(`/game-console archive ${JSON.stringify({ project, reason })}`);
       }, [callCommand]);
 
-      const openDraft = useCallback(() => {
-        setCreated(null);
-        setCreateErr('');
-        setDraft({
-          mode: 'create', project: '',
-          title: '', slug: '', genre: '', notes: '',
-          target: 'wechat', orientation: 'landscape',
-          duration: 60, hearts: 3,
-          offline: true, iap: false, share: '',
-          pace: '', emotion_theme: '',
-          trend_evidence: '', trend_direction: ''
-        });
-      }, []);
+      /* 新建游戏 = 开一个对话，把想法填进输入框。
+       *
+       * 为什么不再用表单：新建的那一刻，用户手里通常只有一句"想做个 XX"。
+       * 玩法类型、节奏、单局时长、分享机制、趋势依据这些，本来就该是聊出来的——
+       * 要求人先填满十几个字段才准开始，等于把评估环节的成本转嫁给一个
+       * 还没想清楚的人。想得清楚就不用 AI 了。
+       *
+       * 所以这里只做一件事：把"我现在什么都不确定"这个起点写成一段话，
+       * 塞进新会话的输入框（不发送），让擅长梳理的东西去梳理。
+       *
+       * 草稿故意不写死任何命令或 skill 名：skill 是按工作区的最近 .git 祖先
+       * 发现的，工作区里不一定有 game-forge。写成自然语言，有没有 skill
+       * 都能成立——有就照着走，没有就先聊需求。
+       */
+      const IDEA_PROMPT = [
+        '我想做一个小游戏，现在只有个模糊的想法，很多东西还没想清楚。',
+        '',
+        '**我的想法：**',
+        '（一句话就行，比如"地铁上躲人的解压小游戏"）',
+        '',
+        '**我比较确定的部分：**',
+        '- 发到哪：（还不确定 / 微信小游戏 / 网页）',
+        '- 想要的感觉：（比如 解压 / 紧张 / 收集的满足感）',
+        '',
+        '别急着开始写游戏。先问我几个关键问题，把想法收敛成能开发的需求：',
+        '玩什么、怎么算一局、玩家为什么愿意再来一局、发到哪个渠道、怎么算做成了。',
+        '问完把结论落成 game.brief.json，再决定要不要往下做。',
+        '',
+        '如果你判断这个方向现在没窗口期，直接说别做，不用硬推。'
+      ].join('\n');
+
+      const openIdea = useCallback(() => {
+        try {
+          if (!props.startConversation) throw new Error('对话通道不可用');
+          props.startConversation(IDEA_PROMPT);
+        } catch (error) {
+          setState((s) => ({ ...s, error: `开新对话失败：${(error && error.message) || error}` }));
+        }
+      }, [props.startConversation]);
 
       /** 改需求：用快照里带的 brief 预填，focus 指定打开后聚焦哪个字段。 */
       const openEdit = useCallback((game, focus) => {
@@ -437,12 +467,8 @@ window.__ModuleLoader__.load({
         setCreateErr('');
         try {
           if (!props.runCommand) throw new Error('命令通道不可用：请先在左侧打开一个会话');
-          const isEdit = draft.mode === 'edit';
-          const line = isEdit
-            ? `/game-console update ${JSON.stringify(draft)}`
-            : `/game-console create ${JSON.stringify(draft)}`;
-          const res = await props.runCommand(line);
-          if (!res || !res.ok) throw new Error((res && res.text) || (isEdit ? '保存失败' : '新建失败'));
+          const res = await props.runCommand(`/game-console update ${JSON.stringify(draft)}`);
+          if (!res || !res.ok) throw new Error((res && res.text) || '保存失败');
           let out = null;
           try { out = JSON.parse(res.text); } catch (e) { out = null; }
           if (!out) throw new Error(`服务端返回无法解析：${String(res.text).slice(0, 200)}`);
@@ -522,7 +548,7 @@ window.__ModuleLoader__.load({
             `${stats.tasks} 项待处理`),
           h('button', {
             className: 'gc-new',
-            onClick: () => { setCreated(null); setDraft({ title: '', slug: '', genre: '', target: 'wechat', duration: 60, hearts: 3, offline: true, iap: false, share: '', pace: '', emotion_theme: '', trend_evidence: '', trend_direction: '', notes: '', orientation: 'landscape' }); }
+            onClick: openIdea
           }, '+ 新建游戏'),
           h('button', { className: 'gc-btn gc-btn-icon', onClick: load, title: '刷新', 'aria-label': '刷新' }, '⟳')
         ),
@@ -720,19 +746,7 @@ window.__ModuleLoader__.load({
           submitDraft,
           patchDraft,
           // 「改一下再试」：留着刚填的值回表单，方便补缺项
-          back: () => { setCreated(null); setCreateErr(''); },
-          // 「再建一个」：清掉这一款的身份字段，结构选项（时长/生命/方向）留着沿用
-          reset: () => {
-            setCreated(null);
-            setCreateErr('');
-            setDraft((d) => (d ? {
-              ...d,
-              mode: 'create', project: '', slug: '',
-              title: '', genre: '', notes: '',
-              share: '', emotion_theme: '',
-              trend_evidence: '', trend_direction: ''
-            } : d));
-          }
+          back: () => { setCreated(null); setCreateErr(''); }
         })
       );
     }
@@ -773,29 +787,27 @@ window.__ModuleLoader__.load({
     //
     // 这些函数放在 ConsolePanel 外面，靠 o 参数拿 state——
     // 组件里的 useState 在这里不可见。
+    /* ---------- 改需求弹层 ---------- *
+     * 只有编辑态。新建走对话（见 IDEA_PROMPT），不填表——
+     * 新建时人手里只有一句想法，让他先填十个字段就是把门槛立在门口。
+     */
     function renderDraft(o) {
       const d = o.draft;
-      const autoSlug = slugPreview(d.slug || d.title);
       const result = o.created;
-      const isEdit = d.mode === 'edit';
       return h('div', {
         className: 'gc-mask',
         onClick: (e) => { if (e.target === e.currentTarget) o.closeDraft(); }
       },
         h('div', { className: 'gc-modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'gc-modal-title' },
           h('div', { className: 'gc-modal-hd' },
-            h('h2', { id: 'gc-modal-title' }, result
-              ? (isEdit ? '改完的自审结果' : '自审结果')
-              : (isEdit ? '改需求' : '新建游戏')),
+            h('h2', { id: 'gc-modal-title' }, result ? '改完的自审结果' : '改需求'),
             !result && h('span', { className: 'gc-sub' },
-              isEdit
-                ? '改完保存会重跑合规 + 基因，看板上的结论跟着变'
-                : '先过需求阶段的合规 + 爆款基因两道关'),
+              '改完保存会重跑合规 + 基因，看板上的结论跟着变'),
             h('button', { className: 'gc-modal-x', onClick: o.closeDraft, 'aria-label': '关闭弹层' }, '✕')
           ),
 
           h('div', { className: 'gc-modal-bd' },
-            result ? renderResult(result) : renderForm(o, d, autoSlug)
+            result ? renderResult(result) : renderForm(o, d)
           ),
 
           h('div', { className: 'gc-modal-ft' },
@@ -803,32 +815,26 @@ window.__ModuleLoader__.load({
               ? [
                 h('button', { className: 'gc-btn', onClick: o.closeDraft, key: 'close' }, '关闭'),
                 h('span', { className: 'gc-grow', key: 'g' }),
-                h('button', { className: 'gc-btn', onClick: o.back, key: 'back' }, '改一下再试'),
-                // 改需求不该出现「再建一个」——用户的意图是改这一款，不是开工新款
-                !isEdit && h('button', { className: 'gc-new', key: 'again', onClick: o.reset }, '再建一个')
+                h('button', { className: 'gc-btn', onClick: o.back, key: 'back' }, '改一下再试')
               ]
               : [
                 o.createErr && h('span', { className: 'gc-note bad', style: { flex: 1 } }, o.createErr),
                 !o.createErr && h('span', {
                   className: 'gc-note', style: { flex: 1 }
-                }, isEdit
-                  ? '只改 brief，不重新构建；改完这道闸点「构建」才生效'
-                  : '只会生成 game.brief.json，不会生成游戏代码'),
+                }, '只改 brief，不重新构建；改完这道闸点「构建」才生效'),
                 h('button', { className: 'gc-btn', onClick: o.closeDraft, disabled: o.creating, key: 'cancel' }, '取消'),
                 h('button', {
                   className: 'gc-new', key: 'ok',
                   disabled: o.creating || !String(d.title || '').trim(),
                   onClick: o.submitDraft
-                }, o.creating
-                  ? (isEdit ? '保存中…' : '创建中…')
-                  : (isEdit ? '保存并重新自审' : '创建并自审'))
+                }, o.creating ? '保存中…' : '保存并重新自审')
               ]
           )
         )
       );
     }
 
-    function renderForm(o, d, autoSlug) {
+    function renderForm(o, d) {
       const f = (key, label, node, hint) => h('div', { className: 'gc-field' },
         h('label', { htmlFor: `gc-f-${key}` }, label),
         node,
@@ -849,38 +855,22 @@ window.__ModuleLoader__.load({
       const bool = (v) => v === 'true';
 
       const notesLen = String(d.notes || '').length;
-      const isEdit = d.mode === 'edit';
 
       return h('div', { className: 'gc-result' },
+
+        // 顶部先说清这是哪款游戏、在哪个目录——改需求不换目录
+        h('div', { className: 'gc-ident' },
+          h('span', { className: 'gc-ident-t' }, d.title || d.project),
+          h('span', { className: 'gc-path' }, d.project)
+        ),
 
         h('div', { className: 'gc-row' },
           f('title', '游戏名',
             input('title', { placeholder: '潮汐逃亡', autoFocus: true }),
             '会写进 brief.title，也显示在看板上'),
-          // 目录名只在新建时可填：改了等于换工程，会把产物、台账全甩开。
-          isEdit
-            ? f('slug', '目录名',
-              h('input', { id: 'gc-f-slug', value: d.project || '', disabled: true, readOnly: true }),
-              '改需求不改目录名——换目录等于换一个工程')
-            : f('slug', '目录名',
-              input('slug', { placeholder: autoSlug || 'tide-escape' }),
-              d.slug
-                ? `games/${autoSlug || '…'}`
-                : (autoSlug ? `留空则用 games/${autoSlug}` : '中文名生成不出目录名，必须手填，用小写字母/数字/连字符'))
-        ),
-
-        h('div', { className: 'gc-row' },
           f('genre', '玩法类型',
             input('genre', { placeholder: '解压躲避' }),
-            '品类决定单局时长该在什么区间'),
-          f('pace', '节奏',
-            select('pace', [
-              { v: '', t: '不填（按品类推断）' },
-              { v: 'twitch', t: 'twitch · 10–90 秒' },
-              { v: 'midcore', t: 'midcore · 60–180 秒' },
-              { v: 'strategy', t: 'strategy · 180–480 秒' }
-            ]),
-            '填了就以它为准，不再靠品类猜')
+            '品类决定单局时长该在什么区间')
         ),
 
         f('notes', '一句话规则',
@@ -1050,15 +1040,6 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** 目录名预览：与服务端 slugify 保持一致。中文会得到空串——这是有意的，
-     *  让用户看见"生成不出来"而不是悄悄变成 games/game-1。 */
-    function slugPreview(s) {
-      return String(s || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 40);
-    }
 
     /* ---------- 注册 ---------- */
     function apply(ctx) {
@@ -1219,6 +1200,21 @@ window.__ModuleLoader__.load({
         return callApi(m[1], payload);
       };
 
+      /**
+       * 开一个新对话，把草稿填进输入框（不发送）。
+       *
+       * 这是「新建游戏」的正确入口：人手里只有一句想法时，需要的是一起想清楚，
+       * 不是一个要求他先想清楚的表单。做法参照歸藏设计插件的 startSession：
+       * 只准备草稿，发送权留给用户——他可能还要补一句"我想在手机上玩"。
+       */
+      const startConversation = (prompt) => {
+        const ui = ctx.get ? ctx.get('uiWorkspace') : ctx.uiWorkspace;
+        if (!ui || typeof ui.startSession !== 'function') {
+          throw new Error('当前环境不支持开新对话（uiWorkspace 不可用）');
+        }
+        ui.startSession(undefined, { prompt, whenDraftExists: 'replace' });
+      };
+
       function currentSessionId(c) {
         try {
           const rows = c.sessions && c.sessions.list && c.sessions.list.getSnapshot
@@ -1242,6 +1238,7 @@ window.__ModuleLoader__.load({
             readGlobal,
             runBuild: runBuildFor(),
             runCommand: runCommandFor(),
+            startConversation,
             coverTone
           })
         }, ConsolePanel);
