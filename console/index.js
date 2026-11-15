@@ -365,6 +365,42 @@ function coverOf(dir) {
   return null;
 }
 
+/* ---------- 找可玩的产物 ---------- *
+ *
+ * 想试玩的时候，人要知道"点哪个文件"。游戏分布在好几个位置，而且不是一回事：
+ *   dist/index.html             Game Studio 导出的单文件，双击就能玩
+ *   targets/web/index.html      引擎 build 出来的网页产物，带 __gameState 可断言
+ *   targets/taptap/*.zip        渠道包，不是拿来玩的
+ *
+ * 只报真正点开就能跑的那种。网页产物优先——它经过流水线断言。
+ *
+ * 注意 URL 不是 /api/file：那条路由带 `Content-Security-Policy: sandbox;
+ * default-src 'none'`，浏览器会拒绝执行文档里的脚本，iframe 里只剩空白。
+ * 试玩必须走本插件注册的 /api/game-console/play，它只加 no-store。
+ */
+function playableOf(dir) {
+  const candidates = [
+    { rel: 'targets/web/index.html', kind: 'web', label: '网页产物（流水线构建）' },
+    { rel: 'dist/index.html', kind: 'studio', label: 'Game Studio 导出' }
+  ];
+  for (const c of candidates) {
+    const abs = path.join(dir, c.rel);
+    try {
+      const st = fs.statSync(abs);
+      if (!st.isFile() || st.size < 512) continue;
+      return {
+        rel: c.rel,
+        kind: c.kind,
+        label: c.label,
+        bytes: st.size,
+        at: st.mtime.toISOString(),
+        url: `/api/game-console/play?project=${encodeURIComponent(path.basename(dir))}`
+      };
+    } catch (e) { /* 没这个产物 */ }
+  }
+  return null;
+}
+
 /* ---------- 需求自审 ---------- *
  *
  * 合规（能不能上架）和基因（值不值得上架）两层一起跑，结果同一份形状，
@@ -608,6 +644,8 @@ function scanAll(root) {
             url: `/api/file?path=${encodeURIComponent(c.abs)}`
           };
         })(),
+        // 能直接点开玩的产物。没有就是没构建过，界面不该给一个点了报错的按钮。
+        playable: playableOf(dir),
         audit,
         // brief 里能被面板编辑的字段。整份 brief 不传——acceptance、channel.appid
         // 这些编辑器不碰，传过去只会诱导界面去改。
@@ -906,8 +944,9 @@ export function apply(ctx, config = {}) {
    * v2: audit / viral / probe
    * v3: cover
    * v4: brief（面板内改需求要用）
+   * v5: playable（试玩入口）
    */
-  const SCHEMA = 4;
+  const SCHEMA = 5;
 
   /* 多实例共存：桌面应用和 `dsh --profile web` 会同时跑，共用同一个工作区。
    * 早期两份进程都往 <root>/.game-console/state.json 和 ~/.dsh/game-console/state.json
@@ -1095,6 +1134,51 @@ export function apply(ctx, config = {}) {
         }
       }
     }), 'game-console: action route');
+
+    /* 试玩专用路由：原样吐出产物 HTML，让 iframe 真的能跑脚本。
+     *
+     * 为什么不复用 /api/file：它固定返回
+     *   Content-Security-Policy: sandbox; default-src 'none'
+     * sandbox 模式下浏览器拒绝执行文档内脚本（实测报
+     *   Blocked script execution ... because the document's frame is sandboxed
+     *   and the 'allow-scripts' permission is not set），iframe 里只剩黑屏。
+     * 那条策略对"预览任意文件"是对的，对"运行游戏"不适用。
+     *
+     * 这里只加 no-store，不放开 sandbox——因为它本身就是产物，不是用户随手
+     * 指定的路径；project 只能落在工作区的 games/ 下，且只认那两份固定文件名。
+     */
+    child.effect(() => child.connection.fetch.register({
+      path: '/api/game-console/play',
+      methods: ['GET'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        const url = new URL(request.url);
+        const project = String(url.searchParams.get('project') || '');
+        if (!project || project.includes('/') || project.includes('..')) {
+          return new Response('bad project', { status: 400 });
+        }
+        try {
+          const root = await resolveRoot(null);
+          if (!root) return new Response('no workspace', { status: 500 });
+          const dir = path.join(path.resolve(root), 'games', project);
+          const p = playableOf(dir);
+          if (!p) return new Response('no playable build', { status: 404 });
+          const html = fs.readFileSync(path.join(dir, p.rel), 'utf8');
+          return new Response(html, {
+            status: 200,
+            headers: {
+              'content-type': 'text/html; charset=utf-8',
+              'cache-control': 'no-store',
+              // 产物是自包含单文件；不给它任何外联能力。
+              // 注意这里**没有** sandbox——加了脚本就跑不起来。
+              'content-security-policy': "default-src 'none'; img-src data: blob:; media-src data: blob:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; form-action 'none'"
+            }
+          });
+        } catch (error) {
+          return new Response(String(error && error.message ? error.message : error), { status: 500 });
+        }
+      }
+    }), 'game-console: play route');
   });
 
   ctx.inject(['commands'], (child) => {

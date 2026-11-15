@@ -251,8 +251,20 @@ window.__ModuleLoader__.load({
   padding:11px 13px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2);
   background:var(--dsw-alias-bg-layer-1)}
 
+/* 试玩弹层：内容区几乎全部给 iframe，边框压到最小 */
+.gc-play-modal{width:min(880px,100%);height:min(90vh,900px)}
+.gc-play-bd{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+  padding:10px;background:var(--dsw-alias-bg-layer-1)}
+.gc-play-frame{width:100%;height:100%;border:0;border-radius:8px;background:#000;
+  aspect-ratio:auto;box-shadow:0 2px 12px rgba(0,0,0,.14)}
+/* 竖屏游戏别被拉成宽屏：内容区居中，iframe 收到 9:16 以内 */
+.gc-play-modal[data-orient='portrait'] .gc-play-bd{padding:14px}
+.gc-play-modal[data-orient='portrait'] .gc-play-frame{width:auto;max-width:min(420px,100%);
+  aspect-ratio:9/16;height:100%}
+
 @media (max-width:720px){
   .gc-row,.gc-row.tri{grid-template-columns:1fr}
+  .gc-play-modal{height:calc(100vh - 32px)}
 }
 @media (prefers-reduced-motion:reduce){
   .gc-root *{transition:none!important;animation:none!important}
@@ -298,6 +310,8 @@ window.__ModuleLoader__.load({
       const [created, setCreated] = useState(null);
       const [creating, setCreating] = useState(false);
       const [createErr, setCreateErr] = useState('');
+      // 试玩弹层：null = 关闭，对象 = { project, title, playable }
+      const [playing, setPlaying] = useState(null);
 
       // 读快照文件，不走命令通道。
       //
@@ -632,6 +646,21 @@ window.__ModuleLoader__.load({
                       title: 'Gate 2：起浏览器实测产物，不采信 brief 自述',
                       onClick: () => startBuild(g.project, 'web', 'probe')
                     }, '实测'),
+                    // 试玩：产物不存在时不给按钮——点了只会报错，
+                    // 不如直接 disabled 并说明要先构建。
+                    h('button', {
+                      className: 'gc-abtn',
+                      disabled: !st.playable,
+                      title: st.playable
+                        ? `试玩：${st.playable.label}（${(st.playable.bytes / 1024).toFixed(0)} KB）`
+                        : '还没有能跑的产物，先点「构建」',
+                      onClick: () => setPlaying({
+                        project: g.project,
+                        title: st.title || g.project,
+                        orientation: st.orientation || 'landscape',
+                        playable: st.playable
+                      })
+                    }, '试玩'),
                     h('button', {
                       className: 'gc-abtn',
                       disabled: anyBusy,
@@ -759,7 +788,56 @@ window.__ModuleLoader__.load({
           patchDraft,
           // 「改一下再试」：留着刚填的值回表单，方便补缺项
           back: () => { setCreated(null); setCreateErr(''); }
+        }),
+
+        playing && renderPlay({
+          ...playing,
+          close: () => setPlaying(null)
         })
+      );
+    }
+
+    /* ---------- 试玩弹层 ---------- *
+     * 产物是自包含单文件（CSP 里 connect-src 'none'，不联网），
+     * 直接用 iframe 指到 /api/file 就行。手机形状的游戏给竖屏比例，
+     * 横屏的给宽一点——按 brief.channel.orientation 选，别一律拉满。
+     */
+    function renderPlay(o) {
+      const pl = o.playable;
+      const kb = Math.round((pl.bytes || 0) / 1024);
+      return h('div', {
+        className: 'gc-mask',
+        onClick: (e) => { if (e.target === e.currentTarget) o.close(); }
+      },
+        h('div', {
+          className: 'gc-modal gc-play-modal',
+          'data-orient': o.orientation || 'landscape',
+          role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'gc-play-title'
+        },
+          h('div', { className: 'gc-modal-hd' },
+            h('h2', { id: 'gc-play-title' }, `试玩 · ${o.title}`),
+            h('span', { className: 'gc-sub' }, `${pl.label} · ${kb} KB`),
+            h('button', { className: 'gc-modal-x', onClick: o.close, 'aria-label': '关闭试玩' }, '✕')
+          ),
+          h('div', { className: 'gc-play-bd' },
+            h('iframe', {
+              className: 'gc-play-frame',
+              src: pl.url,
+              title: `${o.title} 试玩`,
+              allow: 'autoplay; fullscreen'
+            })
+          ),
+          h('div', { className: 'gc-modal-ft' },
+            h('span', { className: 'gc-note', style: { flex: 1 } }, pl.rel),
+            h('a', {
+              className: 'gc-btn',
+              href: pl.url,
+              target: '_blank',
+              rel: 'noreferrer noopener'
+            }, '新窗口打开 ↗'),
+            h('button', { className: 'gc-btn', onClick: o.close }, '关闭')
+          )
+        )
       );
     }
 
