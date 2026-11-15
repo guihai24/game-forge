@@ -200,6 +200,33 @@ export function checkSubmit(dir, channel, report, peers) {
     }
   }
 
+  // 还在用模板自带的占位美术 —— 只提醒，不拦。
+  //
+  // Game Studio 给模板美术的定位是占位：先把流程跑通，好玩了再换 AI 美术。
+  // 带着占位图交付等于没做完，但换美术要花钱（generate_asset 会弹审批卡），
+  // 所以由人决定哪一款值得花这笔钱，机器只负责把事实摆出来。
+  //
+  // 2026-11-15 实测：别挤我和今天也没被裁的 hero.svg md5 完全相同
+  // （a0105dc…，2660 字节），两份 ASSETS.json 里 source 都写着 template。
+  // 交叉比对抓不到这种情况——它俩不是"互相抄袭"，是各自都没画自己的图。
+  try {
+    const ledger = readJson(path.join(dir, 'assets', 'ASSETS.json'));
+    const assets = (ledger && ledger.assets) || {};
+    const templated = Object.entries(assets)
+      .filter(([, a]) => a && a.source === 'template')
+      .map(([slot]) => slot);
+    if (templated.length === 0) { /* 都换过了 */ }
+    else if (Object.keys(assets).length > 0 && templated.length === Object.keys(assets).length) {
+      report.add('WARN', 'template-art',
+        `全部 ${templated.length} 个美术槽位仍是模板占位图（${templated.join('、')}）`,
+        '先用占位图跑通玩法没问题；决定要发了再换 AI 美术，换完这一条会自动消失');
+    } else if (templated.length > 0) {
+      report.add('WARN', 'template-art',
+        `${templated.length} 个美术槽位仍是模板占位图（${templated.join('、')}）`,
+        '其余槽位已换过；这些还没换');
+    }
+  } catch (e) { /* 没有台账就不判 */ }
+
   return self;
 }
 

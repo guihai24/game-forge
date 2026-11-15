@@ -202,13 +202,21 @@ function collectTasks(games) {
         });
       }
     }
-    // 自审阻断排最前：这类问题不改，后面每一步都是白做。
+    // 自审阻断。分两档，跟 publish.mjs 的 precheckGate 一致：
+    //   hard（换皮/雷同）—— 排最前，它直接决定有没有人愿意玩
+    //   soft（渠道合规）—— 排后面，做出来之后再解决
+    // 三档，跟 publish.mjs 一致：改动需求才能解决的挡，改动产物就能解决的不挡。
+    const HARD_BLOCK = new Set([
+      'identical-code', 'template-app',
+      'fanwork', 'brand-ip', 'piracy', 'gambling', 'illegal',
+      'iap-without-isbn', 'virtual-pay-individual'
+    ]);
     for (const i of (g.state.audit && g.state.audit.items) || []) {
       if (i.level !== 'BLOCK') continue;
-      out.unshift({
+      const task = {
         id: `${g.project}:audit:${i.id}`,
-        kind: 'audit-block',
-        title: `${g.state.title} · 自审未过：${i.msg}`,
+        kind: HARD_BLOCK.has(i.id) ? 'audit-hard' : 'audit-soft',
+        title: `${g.state.title} · ${HARD_BLOCK.has(i.id) ? '还不是一款新游戏' : '上线前要处理'}：${i.msg}`,
         detail: i.hint || '规则见 engine/references/rules/channel-rules.md',
         project: g.project,
         title_game: g.state.title,
@@ -220,7 +228,9 @@ function collectTasks(games) {
           ? { action: 'edit', focus: auditFocus(i.id) }
           : { action: 'fix-code', focus: '' }),
         createdAt: new Date().toISOString()
-      });
+      };
+      // 换皮挡在最前面：它回答的是"有没有人愿意玩"，比渠道合规重要。
+      if (HARD_BLOCK.has(i.id)) out.unshift(task); else out.push(task);
     }
 
     // 基因层结论：每个游戏一条决策待办，不是每项一条。
@@ -285,7 +295,12 @@ function collectTasks(games) {
   // 自审阻断 > 基因砍线 > 产物实测 > 有截止时间 > 其余
   // 自审阻断 > 基因砍线 > 方向缺失 > 产物实测 > 有截止时间 > 其余
   // 方向缺失排在实测前面：它决定"该不该做"，实测只在已经决定要做之后才有意义。
-  const rank = (k) => ({ 'audit-block': 0, 'viral-drop': 1, 'viral-direction': 2, 'probe-fail': 3 }[k] ?? 4);
+  // 「还不是一款新游戏」排第一——它回答"有没有人愿意玩"。
+  // 渠道合规（audit-soft）排在最后：做出来之后再解决，不该挡住做游戏。
+  const rank = (k) => ({
+    'audit-hard': 0, 'viral-drop': 1, 'viral-direction': 2,
+    'probe-fail': 3, 'audit-soft': 5
+  }[k] ?? 4);
   return out.sort((a, b) => {
     const pa = rank(a.kind);
     const pb = rank(b.kind);

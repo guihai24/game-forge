@@ -156,6 +156,10 @@ window.__ModuleLoader__.load({
 .gc-card-title{font-size:17px;font-weight:600;margin:0;line-height:1.3;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gc-card-sub{font-size:12.5px;color:var(--dsw-alias-label-tertiary);margin-top:4px}
+/* 占位美术提示：看得见但不抢戏——它不是错误，是"还没到那一步" */
+.gc-card-art{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin-top:6px;
+  display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
+  border:1px dashed var(--dsw-alias-border-l3);line-height:1.5}
 /* 下一步：一句话说清最该处理的事，最多两行 */
 .gc-card-next{font-size:12.5px;color:var(--dsw-alias-label-secondary);margin-top:12px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2);
   line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
@@ -589,24 +593,47 @@ window.__ModuleLoader__.load({
                 const v = st.viral;
                 const a = st.audit;
                 const blocks = a ? a.items.filter((i) => i.level === 'BLOCK') : [];
-                const hasBlock = blocks.length > 0;
+                // 阻断分两档，跟 publish.mjs 的 precheckGate 保持一致：
+                //   硬：跟已有游戏雷同/换皮 —— 这直接回答"有没有人愿意玩"
+                //   软：渠道合规（内购、同人、IP…）—— 做出来之后能解决，
+                //        且改渠道/补资质也可能绕开，不该在构建前挡路
+                // 与 publish.mjs 的三档判定一致：
+                //   改动需求才能解决的 → 挡；改动产物就能解决的 → 不挡。
+                const HARD_BLOCK = {
+                  'identical-code': 1, 'template-app': 1,
+                  fanwork: 1, 'brand-ip': 1, piracy: 1, gambling: 1, illegal: 1,
+                  'iap-without-isbn': 1, 'virtual-pay-individual': 1
+                };
+                const hardBlocks = blocks.filter((i) => HARD_BLOCK[i.id]);
+                const softBlocks = blocks.filter((i) => !HARD_BLOCK[i.id]);
+                const hasHard = hardBlocks.length > 0;
+                const hasBlock = hasHard;   // 只有硬闸才算"阻断"
                 const busy = state.jobRunning && state.job && state.job.project === g.project;
                 const anyBusy = state.jobRunning;
                 const cover = st.cover;
 
                 const badges = [];
-                if (hasBlock) badges.push({ tone: 'bad', text: '合规 阻断' });
-                else if (a) badges.push({ tone: 'ok', text: '合规 通过' });
+                if (hasHard) badges.push({ tone: 'bad', text: '需求 阻断' });
+                else if (a) badges.push({ tone: 'ok', text: '需求 通过' });
                 if (v) badges.push({ tone: v.verdict === 'suggest-drop' ? 'warn' : 'ok', text: `基因 ${v.score}/${v.total}` });
 
                 let nextText = '';
-                if (hasBlock) nextText = blocks[0].msg;
+                if (hasHard) nextText = hardBlocks[0].msg;
                 else if (v && v.negativeTrend) nextText = '品类当前无窗口期，建议归档';
                 // 负向但另立了立项理由：不能跟"建议归档"长得一样，否则
                 // 用户分不清这条是"该砍"还是"换了个打法"。
                 else if (v && v.alternateBet) nextText = `不靠榜势：${String(v.alternateBet.text || '').slice(0, 60)}`;
                 else if (st.probe && st.probe.ok === false) nextText = st.probe.summary;
+                else if (softBlocks.length) nextText = `上线前要处理：${softBlocks[0].msg}`;
                 else if (!a) nextText = '还没跑过自审';
+
+                // 美术还是模板占位图 —— 不拦，但要在卡上看得见。
+                // 四款游戏共用两种美术资源，肉眼分不出是 bug 还是"还没换"，
+                // 所以要明说。换过之后这条自动消失。
+                const templateArt = a
+                  ? (a.items || []).filter((i) => i.id === 'template-art')
+                  : [];
+                const artNote = templateArt.length ? templateArt[0].msg : '';
 
                 return h('article', { className: 'gc-card', key: g.project },
                   h('div', {
@@ -631,6 +658,7 @@ window.__ModuleLoader__.load({
                     h('div', { className: 'gc-card-sub' },
                       [st.genre, st.offline ? '单机' : '联网'].filter(Boolean).join(' · ')
                     ),
+                    artNote && h('div', { className: 'gc-card-art' }, `占位美术 · ${artNote}`),
                     nextText && h('div', { className: 'gc-card-next' }, nextText)
                   ),
                   h('div', { className: 'gc-card-actions' },
@@ -669,8 +697,13 @@ window.__ModuleLoader__.load({
                     }, '改需求'),
                     h('button', {
                       className: 'gc-abtn',
-                      disabled: anyBusy || hasBlock,
-                      title: hasBlock ? `有 ${blocks.length} 项合规阻断，先改` : '打成 TapTap 合规 zip',
+                      // 打包是"上架"这一步，渠道合规在这里才真正生效——
+                      // 所以这里拦的是全部阻断项，不只是换皮。
+                      // 构建/实测/试玩不拦：先做出来再谈渠道。
+                      disabled: anyBusy || blocks.length > 0,
+                      title: blocks.length > 0
+                        ? `有 ${blocks.length} 项渠道合规待处理，先改再打包`
+                        : '打成 TapTap 合规 zip',
                       onClick: () => startBuild(g.project, 'web', 'package-taptap')
                     }, '打包'),
                     h('button', {
@@ -845,7 +878,9 @@ window.__ModuleLoader__.load({
     function kindMark(kind, deadline) {
       if (deadline) return '⏱';
       return {
-        'audit-block': '⊘',
+        'audit-hard': '✕',
+        // 渠道合规用空心圈：它是待办，不是"这游戏不能要"
+        'audit-soft': '○',
         'viral-drop': '✕',
         'viral-direction': '?',
         'probe-fail': '◐'
@@ -853,8 +888,10 @@ window.__ModuleLoader__.load({
     }
 
     function kindTone(kind) {
-      if (kind === 'audit-block' || kind === 'viral-drop' || kind === 'probe-fail') return 'gc-err';
-      if (kind === 'viral-direction') return 'gc-warn';
+      // audit-soft 不用红色：它不该跟"换皮"、"砍线"一个视觉重量
+      if (kind === 'audit-soft') return 'gc-warn';
+      if (kind === 'audit-hard' || kind === 'audit-block' ||
+          kind === 'viral-drop' || kind === 'probe-fail') return 'gc-err';
       return 'gc-warn';
     }
 

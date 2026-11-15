@@ -222,11 +222,25 @@ async function runAll(args) {
 /* ---------- 主流程 ---------- */
 /* ---------- 构建前置自审 ---------- */
 
-/** 有合规 BLOCK 就拒绝构建；基因项只打印提示。
+/** 构建前置自审：分两档，顺序很重要。
  *
- * 为什么放在 build 里而不是靠人记得跑 precheck：需求阶段的自审容易被跳过，
- * 但"要构建了"是个绕不过去的动作。挂在这里，它就变成必经环节。
- * --no-check 可以显式跳过（用于调试流水线本身）。
+ * 2026-11-15 调整。原来的顺序是反的：
+ *   合规 BLOCK → exit(4) 硬拦；基因不过 → 只打印一句提示。
+ * 结果是「能不能上架」有一票否决权，「好不好玩」没有投票权。
+ * agent 的收益函数里只有"别踩合规红线"，于是三款游戏全是同一个模板换皮，
+ * 其中一款的 game.js 从头到尾没被打开过——因为读不读、改不改都不影响过闸。
+ *
+ * 现在按用户的判断顺序分两档：
+ *
+ *   第一档（硬）：这东西是不是一个"真按需求做的游戏"。
+ *     只有一条硬红线——同质化。它直接回答"有没有用户愿意玩"：
+ *     跟上一款一样的游戏不会有人玩。其余渠道合规项一律降为提示。
+ *
+ *   第二档（软）：渠道合规。改渠道、换主体、补软著都能解决，
+ *     属于"做出来之后"的问题，不该在还没做出东西时挡路。
+ *     真正的强校验在 package-taptap / upload 那一步，那时才需要它们。
+ *
+ * --no-check 仍然可以显式跳过（调试流水线本身用）。
  */
 async function precheckGate(game) {
   const briefPath = path.join(game, 'game.brief.json');
@@ -243,8 +257,6 @@ async function precheckGate(game) {
     checkBrief(brief, channel, report);
 
     // 首次构建时 game.js 还没生成，跨游戏比对没有意义（也比不出东西）。
-    // 一旦已有产物，就把 checkSubmit 也跑上：换皮 BLOCK 必须在构建时就拦，
-    // 而不是拖到打包才报——那时已经白构建了一遍。
     const hasCode = fs.existsSync(path.join(game, 'game.js'));
     if (hasCode) {
       checkSubmit(game, channel, report);
@@ -259,13 +271,46 @@ async function precheckGate(game) {
     return;
   }
 
-  const blocks = report.blocked;
-  if (blocks.length) {
-    console.error(`\n✗ 构建前置自审未通过（合规红线${report._submitChecked ? '，含跨游戏同质化比对' : ''}）：`);
-    for (const b of blocks) console.error(`    ✗ ${b.msg}`);
-    console.error('  这些问题不改，做出来也上不了架。用 --no-check 可强行跳过。\n');
+  // 分三档，不是两档。
+  //
+  //   硬（挡构建）：跟已有游戏雷同/换皮。这直接回答"有没有人愿意玩"——
+  //     一样的游戏不会有人玩，做完也白做，所以必须在写代码前就停。
+  //
+  //   需求红线（挡构建）：同人、知名 IP、赌博、盗版、敏感题材。
+  //     这些是**需求本身**不成立，不是"上线时再补"——题材侵权意味着
+  //     整个方向作废，让它构建下去只是浪费一轮。内购/虚拟支付也在此列：
+  //     个人主体拿不到版号，这不是补个章能解决的。
+  //
+  //   软（不挡）：体积超限、外链、名称含英文、联网标记、素材复用提示。
+  //     这些是"做出来之后调一下"就能解决的工程问题。
+  //
+  // 一句话：**改动需求才能解决的，挡；改动产物就能解决的，不挡。**
+  const HARD = new Set([
+    'identical-code', 'template-app',
+    'fanwork', 'brand-ip', 'piracy', 'gambling', 'illegal',
+    'iap-without-isbn', 'virtual-pay-individual'
+  ]);
+  const hardBlocks = report.blocked.filter((b) => HARD.has(b.id));
+  const softBlocks = report.blocked.filter((b) => !HARD.has(b.id));
+
+  if (hardBlocks.length) {
+    const homogenized = hardBlocks.filter((b) => b.id === 'identical-code' || b.id === 'template-app');
+    console.error(homogenized.length
+      ? '\n✗ 这还不是一款新游戏：'
+      : '\n✗ 需求方向本身不成立：');
+    for (const b of hardBlocks) console.error(`    ✗ ${b.msg}`);
+    console.error(homogenized.length
+      ? '  跟已有一款一样或高度相似的产物，发出去也没人玩。改玩法，不是改参数。\n'
+      : '  这类问题改的是需求，不是产物——补资质、换渠道都救不回来。\n');
+    console.error('  用 --no-check 可强行跳过。\n');
     process.exit(4);
   }
+
+  if (softBlocks.length) {
+    console.log(`  · 工程项 ${softBlocks.length} 条（不挡构建，上线前处理）：`);
+    for (const b of softBlocks) console.log(`      ○ ${b.msg}`);
+  }
+
   if (gate1) {
     console.log(`  · 基因 ${gate1.score}/${gate1.total}${gate1.verdict === 'suggest-drop' ? '（建议砍掉，但不阻断构建）' : ''}`);
   }
