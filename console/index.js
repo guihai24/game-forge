@@ -235,7 +235,9 @@ function collectTasks(games) {
         // 负向趋势依据优先级最高：它说明的不是"缺基因"，而是"这个品类现在不该做"
         detail: v.negativeTrend
           ? `trend_evidence 的结论是负向：当前没有窗口期。这条比缺基因更硬——依据充分说明不该做。`
-          : `未过：${missing.join('、') || '—'}。砍线只算能机器判的项，人工项另需确认。规则见 viral-dna-rules.md`,
+          : v.alternateBet
+            ? `趋势负向，但 brief 另立了立项理由：${String(v.alternateBet.text || '').slice(0, 80)}。这条理由是否成立要你判断——不成立就归档。`
+            : `未过：${missing.join('、') || '—'}。砍线只算能机器判的项，人工项另需确认。规则见 viral-dna-rules.md`,
         project: g.project,
         title_game: g.state.title,
         // 砍线要么改需求翻盘，要么归档掉。两种都摆出来，让人当场决定。
@@ -388,6 +390,7 @@ async function auditBrief(brief) {
       total: g1.total,
       verdict: g1.verdict,
       negativeTrend: Boolean(g1.negativeTrend),
+      alternateBet: g1.alternateBet || null,
       needsDirection: Boolean(g1.needsDirection),
       note: g1.note,
       failed: g1.failed.map((i) => ({
@@ -436,6 +439,7 @@ async function createGame(root, payload) {
     emotion_theme: String(payload.emotion_theme || '').trim(),
     trend_evidence: String(payload.trend_evidence || '').trim(),
     trend_direction: ['positive', 'negative'].includes(payload.trend_direction) ? payload.trend_direction : '',
+    alternate_bet: String(payload.alternate_bet || '').trim(),
     rules: {
       duration: Number(payload.duration) || 60,
       hearts: Number(payload.hearts) || 3
@@ -494,6 +498,7 @@ async function updateBrief(root, payload) {
     trend_direction: payload.trend_direction !== undefined
       ? (['positive', 'negative'].includes(payload.trend_direction) ? payload.trend_direction : '')
       : (prev.trend_direction || ''),
+    alternate_bet: String(payload.alternate_bet !== undefined ? payload.alternate_bet : prev.alternate_bet || '').trim(),
     rules: {
       ...(prev.rules || {}),
       duration: Number(payload.duration !== undefined ? payload.duration : (prev.rules && prev.rules.duration)) || 60,
@@ -619,6 +624,7 @@ function scanAll(root) {
             emotion_theme: b.emotion_theme || '',
             trend_evidence: b.trend_evidence || '',
             trend_direction: b.trend_direction || '',
+            alternate_bet: b.alternate_bet || '',
             duration: (b.rules && b.rules.duration) || 60,
             hearts: (b.rules && b.rules.hearts) || 3,
             orientation: (b.channel && b.channel.orientation) || 'landscape'
@@ -632,6 +638,9 @@ function scanAll(root) {
           // 有实测修正时，分数和"从 brief 静态推测"不是一回事，界面要说清楚
           reconciled: Boolean(gate1.reconciled),
           negativeTrend: Boolean(gate1.negativeTrend),
+          // 趋势负向但另立了立项理由：不砍线。界面必须能区分
+          // "靠榜势" 和 "靠别的"——两者显示一样的话，规则就等于没改。
+          alternateBet: gate1.alternateBet || null,
           // 写了 trend_evidence 但没标 trend_direction：机器不猜方向，
           // 这条要显式暴露给界面，否则看板上"干干净净"，实际却没判断过方向。
           needsDirection: Boolean(gate1.needsDirection),

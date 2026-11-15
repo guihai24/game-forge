@@ -238,6 +238,18 @@ export function scoreBrief(brief, known) {
   const te = String(b.trend_evidence || '').trim();
   const hasTrend = te.length >= 10;
   const declared = String(b.trend_direction || '').toLowerCase();
+  // 负向趋势下的替代立项理由。
+  //
+  // "负向即砍线"隐含假设：这游戏要靠榜单势能拿用户。对"微信小游戏冲畅销榜"成立，
+  // 对"零安装单文件网页 + 靠梗传播"不成立——后者不需要榜单有位次。
+  // 实测撞到过（games/bie-ji-wo）：模型的 trend_direction 是 negative，
+  // 但同时写明"立项理由不是榜单势能，而是零安装 + 场景共鸣 + 梗"，
+  // 结果看板一边刚写完 58 步、一边劝归档。
+  //
+  // 机器不判断"这个理由合不合理"（那又是猜语义），只核对有没有写、够不够具体。
+  // 合理性由人复核——看板会显式标"靠的不是榜势"。
+  const altBet = String(b.alternate_bet || '').trim();
+  const hasAltBet = altBet.length >= 10;
   const NEGATIVE_HINT = /无窗口期|没有窗口|不建议|不宜|下行|萎缩|已饱和|接盘|不占势|未进榜|没有机会|送死|凉了|挤不进去|看不到机会|竞争激烈/;
   const hinted = hasTrend && NEGATIVE_HINT.test(te);
   // 有显式字段就以它为准；没有就用启发式当"疑似"，但不触发砍线
@@ -249,8 +261,9 @@ export function scoreBrief(brief, known) {
     id: 'VD-08',
     ok: hasTrend,
     label: '时间窗口',
-    // 常见三种情况：
-    //   negative          已标负向 → 触发砍线
+    // 常见几种情况：
+    //   negative           已标负向 → 触发砍线
+    //   negative+altBet    负向，但写了替代立项理由 → 不砍线，标"靠的不是榜势"
     //   suspected-negative 措辞像负向但没标 → 需要人确认方向，不触发砍线
     //   unset             完全没线索 → 也需要人确认方向
     // 后两种都置 needsDirection，让上层提示补字段。
@@ -258,15 +271,19 @@ export function scoreBrief(brief, known) {
     detail: !hasTrend
       ? 'brief 没写 trend_evidence（凭什么现在是这个题材的窗口期）'
       : direction === 'negative'
-        ? `结论负向：${te.slice(0, 70)}…（依据充分，本项通过；但它说明不该做）`
+        ? (hasAltBet
+          ? `结论负向，但写了替代立项理由：${altBet.slice(0, 60)}…（不靠榜单势能，靠这条另立）`
+          : `结论负向：${te.slice(0, 70)}…（依据充分，本项通过；但它说明不该做）`)
         : direction === 'suspected-negative'
           ? `疑似负向但未标注 trend_direction：${te.slice(0, 60)}…（请补 trend_direction: negative/positive，机器不猜）`
           : direction === 'positive'
             ? `trend_evidence: ${te.slice(0, 60)}`
             : `trend_evidence: ${te.slice(0, 60)}（未标 trend_direction）`,
     manual: false,
-    // 只有显式标注才算数；启发式命中的只提示
-    negative: hasTrend && direction === 'negative'
+    // 只有显式标注才算数；启发式命中的只提示。
+    // 写了替代立项理由的，不再算"负向触砍"。
+    negative: hasTrend && direction === 'negative' && !hasAltBet,
+    alternateBet: hasTrend && direction === 'negative' && hasAltBet
   });
 
   const passed = items.filter((i) => i.ok).length;
@@ -278,6 +295,9 @@ export function scoreBrief(brief, known) {
   // 负向依据：项本身通过（你做了判断），但结论就是「不该做」。
   // 这不该被"缺 2 条"的计数掩盖——证据说没势，比缺两条基因更该砍。
   const negativeTrend = items.filter((i) => i.id === 'VD-08' && i.ok && i.negative);
+  // 负向但有替代立项理由：不砍线，但上游必须显式标出来——
+  // "靠的不是榜势"和"有榜势"是两件事，不能让看板显示得一样。
+  const alternateBet = items.find((i) => i.id === 'VD-08' && i.alternateBet);
   // 写了证据但没标方向：不触发砍线，但要显式提醒补字段——
   // 否则机器只能猜，而猜错的代价是"该砍的没砍"。
   const needsDirection = items.some((i) => i.needsDirection);
@@ -295,12 +315,19 @@ export function scoreBrief(brief, known) {
     humanCount: human.length,
     unmeasuredCount: unmeasured.length,
     negativeTrend: negativeTrend.length > 0,
+    // 负向趋势 + 替代立项理由：不砍线，但界面要说清"靠的不是榜势"
+    alternateBet: alternateBet ? {
+      text: String(b?.alternate_bet || '').trim(),
+      trend: String(b?.trend_evidence || '').trim()
+    } : null,
     needsDirection,
     verdict: drop ? 'suggest-drop' : 'proceed',
     note: negativeTrend.length
       ? 'trend_evidence 的结论是负向（当前没有窗口期）——按规则建议别做'
-      : needsDirection
-        ? 'trend_evidence 未标 trend_direction（positive/negative），机器不猜方向，请补这个字段'
+      : alternateBet
+        ? '趋势是负向，但写了替代立项理由——不按榜势算，靠那条另立；理由是否成立要人复核'
+        : needsDirection
+          ? 'trend_evidence 未标 trend_direction（positive/negative），机器不猜方向，请补这个字段'
       : autoFailed.length >= 2
         ? `${autoFailed.length} 项自动判定未过（${autoFailed.map((i) => i.label).join('、')}），按规则建议别做`
         : autoFailed.length === 1
@@ -405,6 +432,8 @@ export function verdictSummary(gate1, gate2) {
   // 砍线要说清原因：负向趋势 / 缺 2 条 / 缺方向标注，是三种不同的事，
   // 笼统写"已触发砍线"等于没说。
   if (gate1 && gate1.negativeTrend) parts.push('趋势依据为负向，建议别做');
+  // 负向但另立了立项理由：不能只说"负向"，否则跟被砍的写法一模一样。
+  else if (gate1 && gate1.alternateBet) parts.push('趋势负向，但另立了立项理由（不靠榜势）');
   else if (gate1 && gate1.verdict === 'suggest-drop') parts.push('需求阶段缺 2 条以上');
   if (gate1 && gate1.needsDirection) parts.push('trend_evidence 未标方向');
   if (gate1 && gate1.overridden && gate1.overridden.length) {

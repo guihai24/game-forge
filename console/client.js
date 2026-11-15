@@ -397,18 +397,26 @@ window.__ModuleLoader__.load({
        * 草稿故意不写死任何命令或 skill 名：skill 是按工作区的最近 .git 祖先
        * 发现的，工作区里不一定有 game-forge。写成自然语言，有没有 skill
        * 都能成立——有就照着走，没有就先聊需求。
+       *
+       * 写法上踩过坑（2026-11-15 实测）：早期把提示写在字段后面，
+       * 「**我的想法：**」下一行跟「（一句话就行，比如…）」。用户不替换就直接
+       * 发出去，模型三次收到"我的想法："后面是空括号，只能回"你这几次都是
+       * 只有表头、内容没跟过来"。
+       *
+       * 现在改成：**只有待填的字段名，提示全部挪到字段上方当说明**，
+       * 并且明确告诉用户"把下面三行改掉"。空字段比"括号占位符"诚实——
+       * 模型看得懂空的，看不懂"看起来像内容其实不是"。
        */
       const IDEA_PROMPT = [
-        '我想做一个小游戏，现在只有个模糊的想法，很多东西还没想清楚。',
+        '我想做一个小游戏，现在还只有个模糊的想法。',
         '',
-        '**我的想法：**',
-        '（一句话就行，比如"地铁上躲人的解压小游戏"）',
+        '（下面三行请改成你自己的内容，改完再发；不确定的写"还没想好"也行）',
         '',
-        '**我比较确定的部分：**',
-        '- 发到哪：（还不确定 / 微信小游戏 / 网页）',
-        '- 想要的感觉：（比如 解压 / 紧张 / 收集的满足感）',
+        '想法：',
+        '渠道：',
+        '想要的感觉：',
         '',
-        '别急着开始写游戏。先问我几个关键问题，把想法收敛成能开发的需求：',
+        '先别急着写游戏。先问我几个关键问题，把想法收敛成能开发的需求：',
         '玩什么、怎么算一局、玩家为什么愿意再来一局、发到哪个渠道、怎么算做成了。',
         '问完把结论落成 game.brief.json，再决定要不要往下做。',
         '',
@@ -447,7 +455,8 @@ window.__ModuleLoader__.load({
           pace: b.pace || '',
           emotion_theme: b.emotion_theme || '',
           trend_evidence: b.trend_evidence || '',
-          trend_direction: b.trend_direction || ''
+          trend_direction: b.trend_direction || '',
+          alternate_bet: b.alternate_bet || ''
         });
       }, []);
 
@@ -579,6 +588,9 @@ window.__ModuleLoader__.load({
                 let nextText = '';
                 if (hasBlock) nextText = blocks[0].msg;
                 else if (v && v.negativeTrend) nextText = '品类当前无窗口期，建议归档';
+                // 负向但另立了立项理由：不能跟"建议归档"长得一样，否则
+                // 用户分不清这条是"该砍"还是"换了个打法"。
+                else if (v && v.alternateBet) nextText = `不靠榜势：${String(v.alternateBet.text || '').slice(0, 60)}`;
                 else if (st.probe && st.probe.ok === false) nextText = st.probe.summary;
                 else if (!a) nextText = '还没跑过自审';
 
@@ -920,7 +932,9 @@ window.__ModuleLoader__.load({
             select('trend_direction', [
               { v: '', t: '未判断' },
               { v: 'positive', t: '正向 · 有窗口期' },
-              { v: 'negative', t: '负向 · 没窗口期（直接砍线）' }
+              // 文案改了：原来写"直接砍线"，现在写了替代立项理由就不砍。
+              // 不写清楚，用户会以为选了负向就一定被归档。
+              { v: 'negative', t: '负向 · 没窗口期（没替代理由则砍线）' }
             ]),
             '不填会一直提示补，机器不猜方向')
         ),
@@ -933,6 +947,20 @@ window.__ModuleLoader__.load({
             onChange: (e) => patch({ trend_evidence: e.target.value })
           }),
           '至少 10 个字才算有效证据。写负向结论就把上面方向选成「负向」'
+        ),
+
+        // 只有负向时才需要填：这是"明知道没榜势还要做"的理由。
+        // 机器只核对有没有写、够不够具体；合不合理由人复核。
+        d.trend_direction === 'negative' && f('alternate_bet', '替代立项理由（不靠榜单时填）',
+          h('textarea', {
+            id: 'gc-f-alternate_bet',
+            value: String(d.alternate_bet || ''),
+            placeholder: '例：单文件网页，不靠榜单；靠通勤场景共鸣和「别挤我」这个梗转发',
+            onChange: (e) => patch({ alternate_bet: e.target.value })
+          }),
+          String(d.alternate_bet || '').trim().length >= 10
+            ? '已写替代理由：不按负向砍线，但看板会标「不靠榜势」，理由是否成立要你复核'
+            : '不填就按负向砍线。填了（≥10 字）则不砍线，改按这条理由算'
         ),
 
         h('div', { className: 'gc-field' },
@@ -967,6 +995,9 @@ window.__ModuleLoader__.load({
       if (v.error) { concl = `自审没跑起来：${v.error}（brief 已落盘，可以手动补）`; tone = 'bad'; }
       else if (blocks.length) { concl = `不能做：有 ${blocks.length} 项合规阻断，改需求再来`; tone = 'bad'; }
       else if (drop) { concl = '建议别做：爆款基因没过砍线，做了大概率白烧时间'; tone = 'weak'; }
+      // 负向趋势 + 替代立项理由：既不是"通过"，也不是"砍掉"，是第三种状态。
+      // 说成"通过"会掩盖"这品类确实没势"；说成"砍线"会否掉人写的理由。
+      else if (v.alternateBet) { concl = '可以做，但不是靠榜势——靠 brief 里写的那条立项理由；成不成立要你判断'; tone = 'weak'; }
       else if (auto.length) { concl = `可以做，但先补 ${auto.length} 项；还没到砍线`; tone = 'weak'; }
       else if (v.needsDirection) { concl = '可以做，但趋势方向没标，机器没法定砍线'; tone = 'weak'; }
 
