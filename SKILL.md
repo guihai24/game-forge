@@ -20,7 +20,33 @@ related-skills:
 
 ## 第一步：需求梳理（不能跳过）
 
-用户一句话往往只有"做个 XXX 的游戏"。先按 `engine/references/intake.md` 的三层问题补齐，
+用户一句话往往只有"做个 XXX 的游戏"。
+
+### 玩法必须先玩过，不能靠问
+
+**不要问用户"想做什么玩法"**——用户不懂术语，也无法从文字想象手感。
+2026-11-15 的教训：问「玩起来什么手感」，用户答「需要讨论一下」，
+流程却按推荐项做成"躲避"，做完 58 步后用户才说「整个产品形态就有问题」。
+
+正确流程：
+
+1. 听题材和情绪（用户的场景、想吐槽什么）
+2. 从 `engine/references/genres/README.md` 挑 **3 个**不同玩法
+3. 各生成一个能玩的原型，让用户挨个玩：
+
+```bash
+node engine/scripts/prototype.mjs --list                 # 看有哪些玩法
+node engine/scripts/prototype.mjs --genre reflex \
+     --title "抢早高峰" --out games/<slug>/proto/reflex
+```
+
+4. 用户玩完说「哪个对 / 哪里不对」——**不要求用户说术语**
+5. 选定后才写 brief、进 Game Studio 正式开发
+
+**用户没明确选定玩法就开工 = 返工。** 用户说"再讨论一下"不是同意，是没定。
+
+### 渠道
+
 **不要跳过渠道这一层**——它决定后面整条路径。
 
 问完把结论写进 `<游戏目录>/game.brief.json`：
@@ -39,6 +65,8 @@ node engine/scripts/brief.mjs check --file <游戏目录>/game.brief.json
 | 字段 | 作用 |
 |------|------|
 | `target` | `wechat` / `web`，决定走哪条分支 |
+| `genre` | **玩法类型**（reflex/puzzle/strategy/sim/bluff/roleplay 或具体描述）。不是模板名 |
+| `pace` | **节奏**（一局多长）。与 `genre` 正交，别混成一个字段 |
 | `rules` | 时长、命数、速度等，与 `game.json` 对齐 |
 | `acceptance.mustReachPhase` | 至少要经过哪些阶段，默认 `["playing"]` |
 | `acceptance.minFps` | 帧率参考值，默认 45（**软指标**，见下方说明） |
